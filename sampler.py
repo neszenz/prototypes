@@ -16,6 +16,8 @@ vertex loop:
     list of vertices which are lists of 2 or 3 coordinate values
 """
 
+import datetime
+import os
 import random #TODO remove
 
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB #TODO remove
@@ -25,7 +27,23 @@ from OCC.Extend.TopologyUtils import TopologyExplorer
 
 PATH_BOX = '../resources/step/boxWithHole.step' #TODO remove
 PATH_42 = '../resources/abc/step/00090042/00090042_1cbd5c59fb8c0895c3599d4d_step_007.step' #TODO remove
-PATH = PATH_BOX
+PATH = PATH_BOX #TODO remove
+
+OUTPUT_DIR = os.path.join('tmp', 'sampler')
+# to make written file names unique, a timestamp prefix is used
+TIMESTAMP = datetime.datetime.now()
+PREFIX_SHORT = TIMESTAMP.strftime('%y%b%d_%H%M%S_')
+PREFIX_LONG = TIMESTAMP.strftime('%y%b%d_%H%M%S_%f_')
+
+def process_solid(solid):
+    print(PREFIX_SHORT)
+    print(PREFIX_LONG)
+    pass
+
+def process_file(path):
+    solids = read_step_file(path, return_as_shapes=True)
+    for solid in solids:
+        process_solid(solid)
 
 def open_file(display): #TODO remove
     solids = read_step_file(PATH, return_as_shapes=True)
@@ -42,5 +60,5 @@ def open_file(display): #TODO remove
 if __name__ == '__main__':
     display, start_display, _, _ = init_display() #TODO remove
     open_file(display) #TODO remove
-    start_display() #TODO remove
-    pass
+    process_file(PATH)
+    # start_display() #TODO remove
