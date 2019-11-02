@@ -47,58 +47,11 @@ OUTPUT_DIR = os.path.join('tmp', 'sampler')
 LINES_EXTENSION = '.lines'
 # to make written file names unique, a timestamp prefix is used
 TIMESTAMP = datetime.datetime.now()
-PREFIX_SHORT = TIMESTAMP.strftime('%y%b%d_%H%M%S')
-PREFIX_LONG = TIMESTAMP.strftime('%y%b%d_%H%M%S_%f')
+PREFIX_SHORT = TIMESTAMP.strftime('%y%m%d_%H%M%S')
+PREFIX_LONG = TIMESTAMP.strftime('%y%m%d_%H%M%S_%f')
 NUMBER_OF_SAMPLES = 100
 
 ## function body = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-
-def generate_mesh_from_edge(edge, shape_maps):
-    edge_mesh = list()
-    curve = BRepAdaptor_Curve(edge)
-    fp = curve.FirstParameter()
-    lp = curve.LastParameter()
-    p_length = lp - fp
-    assert NUMBER_OF_SAMPLES > 1
-    for i in range(0, NUMBER_OF_SAMPLES):
-        parameter = fp + i * (p_length / (NUMBER_OF_SAMPLES-1))
-        if i == NUMBER_OF_SAMPLES-1:
-            parameter = lp
-        point = curve.Value(parameter)
-        edge_mesh.append([point.X(), point.Y(), point.Z()])
-    return edge_mesh
-
-def generate_mesh_from_wire(wire, face_ori, shape_maps):
-    wire_mesh = list()
-    ex = TopExp_Explorer(wire, TopAbs_EDGE)
-    while ex.More():
-        edge = ex.Current()
-        edge_mesh = generate_mesh_from_edge(edge, shape_maps)
-        if len(edge_mesh) > 0:
-            if edge.Orientation() != face_ori:
-                edge_mesh.reverse()
-            edge_mesh.pop()
-            wire_mesh += edge_mesh
-        ex.Next()
-    return wire_mesh
-
-def generate_mesh_from_face(face, shape_maps):
-    _, wire_map, _ = shape_maps
-    face_mesh = (list(), list())
-    outer_loop, inner_loops = face_mesh
-    face_ori = face.Orientation()
-    ex = TopExp_Explorer(face, TopAbs_WIRE)
-    outer_wire_id = wire_map.FindIndex(shapeanalysis.OuterWire(face))
-    while ex.More():
-        wire = ex.Current()
-        wire_id = wire_map.FindIndex(wire)
-        if wire_id == outer_wire_id:
-            outer_loop += generate_mesh_from_wire(wire, face_ori, shape_maps)
-        else:
-            inner_loops.append(generate_mesh_from_wire(wire, face_ori, shape_maps))
-        ex.Next()
-
-    return face_mesh
 
 def generate_shape_maps(compound):
     face_map = TopTools_IndexedMapOfShape()
@@ -109,15 +62,92 @@ def generate_shape_maps(compound):
     topexp.MapShapes(compound, TopAbs_EDGE, edge_map)
     return (face_map, wire_map, edge_map)
 
-def generate_mesh_from_compound(compound):
-    model_mesh = list()
-    shape_maps = generate_shape_maps(compound)
+def sample_all_edges(compound, shape_maps):
+    def generate_mesh_from_edge(edge, shape_maps):
+        edge_mesh = list()
+        curve = BRepAdaptor_Curve(edge)
+        fp = curve.FirstParameter()
+        lp = curve.LastParameter()
+        p_length = lp - fp
+        assert NUMBER_OF_SAMPLES > 1
+        for i in range(0, NUMBER_OF_SAMPLES):
+            parameter = fp + i * (p_length / (NUMBER_OF_SAMPLES-1))
+            if i == NUMBER_OF_SAMPLES-1:
+                parameter = lp
+            point = curve.Value(parameter)
+            edge_mesh.append([point.X(), point.Y(), point.Z()])
+        return edge_mesh
+    _, _, edge_map = shape_maps
+    edge_meshes = {}
+    number_of_edges = TopologyExplorer(compound).number_of_edges()
+    for edge_id in range(1, number_of_edges+1):
+        edge = edge_map.FindKey(edge_id)
+        edge_mesh = generate_mesh_from_edge(edge, shape_maps)
+        edge_meshes[edge_id] = edge_mesh
+    return edge_meshes
+
+# same structure as model mesh, but wires consist of a list of tupels containing
+# infos about the edge for later matching with separately sampled edge meshes
+def generate_mesh_framework(compound, shape_maps):
+    def generate_face_framework(face, shape_maps):
+        def generate_wire_framework(wire, face_ori, shape_maps):
+            _, _, edge_map = shape_maps
+            wire_framework = list()
+            ex = TopExp_Explorer(wire, TopAbs_EDGE)
+            while ex.More():
+                edge = ex.Current()
+                edge_id = edge_map.FindIndex(edge)
+                need_reversed = edge.Orientation() != face_ori
+                edge_infos = (edge_id, need_reversed)
+                # edge_mesh = generate_mesh_from_edge(edge, shape_maps)
+                # if len(edge_mesh) > 0:
+                    # edge_mesh.pop()
+                wire_framework.append(edge_infos)
+                ex.Next()
+            return wire_framework
+        _, wire_map, _ = shape_maps
+        face_framework = (list(), list())
+        outer_loop, inner_loops = face_framework
+        face_ori = face.Orientation()
+        ex = TopExp_Explorer(face, TopAbs_WIRE)
+        outer_wire_id = wire_map.FindIndex(shapeanalysis.OuterWire(face))
+        while ex.More():
+            wire = ex.Current()
+            wire_id = wire_map.FindIndex(wire)
+            if wire_id == outer_wire_id:
+                outer_loop += generate_wire_framework(wire, face_ori, shape_maps)
+            else:
+                inner_loops.append(generate_wire_framework(wire, face_ori, shape_maps))
+            ex.Next()
+
+        return face_framework
+    model_framework = list()
     ex = TopologyExplorer(compound)
     print('compound has', ex.number_of_faces(), 'faces')
+    print('            ', ex.number_of_wires(), 'wires')
+    print('            ', ex.number_of_edges(), 'edges')
     for face in ex.faces():
-        face_mesh = generate_mesh_from_face(face, shape_maps)
-        model_mesh.append(face_mesh)
-    return model_mesh
+        face_framework = generate_face_framework(face, shape_maps)
+        model_framework.append(face_framework)
+    return model_framework
+
+def combine_framework_with_edge_meshes(framework, edge_meshes):
+    def process_wire_framework(framework, edge_meshes):
+        wire_mesh = list()
+        for edge_info in framework:
+            edge_mesh = edge_meshes[edge_info[0]].copy()
+            if edge_info[1]:
+                edge_mesh.reverse()
+            edge_mesh.pop()
+            wire_mesh += edge_mesh
+        framework.clear()
+        framework += wire_mesh
+    for face in framework:
+        outer_wire = face[0]
+        process_wire_framework(outer_wire, edge_meshes)
+        for inner_wire in face[1]:
+            process_wire_framework(inner_wire, edge_meshes)
+    return framework
 
 def factory(type):
     if type in SAMPLER_TYPE.string_dict:
@@ -127,20 +157,21 @@ def factory(type):
     def sampler(path):
         print('>> start sampling \'', path, '\'', sep='')
         compound = read_step_file(path)
-        return generate_mesh_from_compound(compound)
+        shape_maps = generate_shape_maps(compound)
+        #TODO different sampler methods
+        edge_meshes = sample_all_edges(compound, shape_maps)
+        framework = generate_mesh_framework(compound, shape_maps)
+        return combine_framework_with_edge_meshes(framework, edge_meshes)
     return sampler
 
-def generate_output_file_path():
-    name = PREFIX_SHORT + LINES_EXTENSION
-    path = os.path.join(OUTPUT_DIR, name)
-    if os.path.exists(path):
-        name = PREFIX_LONG + LINES_EXTENSION
-    assert not os.path.exists(path)
-    return path
-
-def write_mesh_to_file(mesh, path):
-    print('>> write to file \"', path, '\"', sep='')
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+def write_mesh_to_file(mesh):
+    def generate_output_file_path():
+        name = PREFIX_SHORT + LINES_EXTENSION
+        path = os.path.join(OUTPUT_DIR, name)
+        if os.path.exists(path):
+            name = PREFIX_LONG + LINES_EXTENSION
+        assert not os.path.exists(path)
+        return path
     def write_wire_mesh(wire_mesh, output):
         for iVertex in range(0, len(wire_mesh)):
             v0 = wire_mesh[iVertex]
@@ -149,6 +180,9 @@ def write_mesh_to_file(mesh, path):
             output.write(' ')
             output.write('%s %s %s' % (v1[0], v1[1], v1[2]))
             output.write('\n')
+    path = generate_output_file_path()
+    print('>> write to file \"', path, '\"', sep='')
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     with open(path, 'a') as output:
         for face_mesh in mesh:
             outer_wire_mesh = face_mesh[0]
@@ -159,5 +193,4 @@ def write_mesh_to_file(mesh, path):
 if __name__ == '__main__':
     sampler = factory(SAMPLER_TYPE.SIMPLE)
     mesh = sampler(INPUT_PATH)
-    output_path = generate_output_file_path()
-    write_mesh_to_file(mesh, output_path)
+    write_mesh_to_file(mesh)

@@ -15,6 +15,7 @@ ZOOM_STEP = 5
 rotation = 0
 ROTATION_STEP = 10
 
+lines = list()
 window = pyglet.window.Window(DEFAULT_X, DEFAULT_Y,
                               fullscreen=False,
                               resizable=True,
@@ -29,14 +30,14 @@ def get_path_to_latest_lines_file():
 # lines are a tuple of two points, which are lists of coordinate values
 # returns a list of those lines
 def load_lines_form_file():
-    lines = []
+    global lines
+    lines.clear()
     path = get_path_to_latest_lines_file()
     with open(path, 'r') as f:
         for l in f:
             fl = [float(i) for i in l.split()]
             line = (fl[0:3], fl[3:])
             lines.append(line)
-    return lines
 
 def updateProjectionMatrix(width, height):
     glViewport(0, 0, width, height)
@@ -53,16 +54,15 @@ def on_resize(width, height):
     updateProjectionMatrix(width, height)
     return pyglet.event.EVENT_HANDLED
 
-def apply_to_zoom(value):
-    global zoom
-    if zoom + value < 1:
-        zoom = 1
-    else:
-        zoom += value
-    updateProjectionMatrix(window.width, window.height)
-
 @window.event
 def on_key_press(symbol, modifiers):
+    def apply_to_zoom(value):
+        global zoom
+        if zoom + value < 1:
+            zoom = 1
+        else:
+            zoom += value
+        updateProjectionMatrix(window.width, window.height)
     global zoom, rotation
     if symbol == key.UP:
         apply_to_zoom(-ZOOM_STEP)
@@ -72,11 +72,13 @@ def on_key_press(symbol, modifiers):
         rotation -= ROTATION_STEP
     if symbol == key.RIGHT:
         rotation += ROTATION_STEP
+    if symbol == key.U and modifiers == 0:
+        global lines
+        load_lines_form_file()
     # return pyglet.event.EVENT_HANDLED # disables ESC termination handler
 
 @window.event
 def on_draw():
-    lines = load_lines_form_file()
     glClear(GL_COLOR_BUFFER_BIT)
     glLoadIdentity()
     global rotation
@@ -91,4 +93,5 @@ def on_draw():
     glEnd()
 
 if __name__ == '__main__':
+    load_lines_form_file()
     pyglet.app.run()
