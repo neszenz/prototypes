@@ -23,7 +23,7 @@ import random #TODO remove
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB #TODO remove
 from OCC.Core.ShapeAnalysis import shapeanalysis
-from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_REVERSED
+from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FORWARD, TopAbs_REVERSED
 from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopTools import TopTools_IndexedMapOfShape
 from OCC.Display.SimpleGui import init_display #TODO remove
@@ -31,9 +31,12 @@ from OCC.Extend.DataExchange import read_step_file, write_step_file
 from OCC.Extend.TopologyUtils import TopologyExplorer
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 
-PATH_BOX = '../resources/step/boxWithHole.step' #TODO remove
-PATH_42 = '../resources/abc/step/00090042/00090042_1cbd5c59fb8c0895c3599d4d_step_007.step' #TODO remove
-INPUT_PATH = PATH_42 #TODO remove
+PATH_BOX = '../resources/step/boxWithHole.step'
+PATH_X = '../resources/step/surface_filling.step'
+PATH_42 = '../resources/abc/step/00090042/00090042_1cbd5c59fb8c0895c3599d4d_step_007.step'
+PATH_111 = '../resources/abc/step/00090111/00090111_7eac35f07183d39b4da202d3_step_000.step'
+PATH_99999 = '../resources/abc/step/00099999/00099999_df6629a908dec75f8a69bda7_step_001.step'
+INPUT_PATH = PATH_99999
 
 class SAMPLER_TYPE: # enum for calling sampler factory
     SIMPLE = 0
@@ -49,7 +52,10 @@ LINES_EXTENSION = '.lines'
 TIMESTAMP = datetime.datetime.now()
 PREFIX_SHORT = TIMESTAMP.strftime('%y%m%d_%H%M%S')
 PREFIX_LONG = TIMESTAMP.strftime('%y%m%d_%H%M%S_%f')
-NUMBER_OF_SAMPLES = 100
+#config
+NUMBER_OF_SAMPLES = 20
+INCLUDE_OUTER_WIRES = True
+INCLUDE_INNER_WIRES = True
 
 ## function body = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 
@@ -99,25 +105,24 @@ def generate_mesh_framework(compound, shape_maps):
                 edge_id = edge_map.FindIndex(edge)
                 need_reversed = edge.Orientation() != face_ori
                 edge_infos = (edge_id, need_reversed)
-                # edge_mesh = generate_mesh_from_edge(edge, shape_maps)
-                # if len(edge_mesh) > 0:
-                    # edge_mesh.pop()
                 wire_framework.append(edge_infos)
                 ex.Next()
             return wire_framework
         _, wire_map, _ = shape_maps
         face_framework = (list(), list())
         outer_loop, inner_loops = face_framework
-        face_ori = face.Orientation()
         ex = TopExp_Explorer(face, TopAbs_WIRE)
         outer_wire_id = wire_map.FindIndex(shapeanalysis.OuterWire(face))
         while ex.More():
             wire = ex.Current()
             wire_id = wire_map.FindIndex(wire)
-            if wire_id == outer_wire_id:
-                outer_loop += generate_wire_framework(wire, face_ori, shape_maps)
+            wire_ori = wire.Orientation()
+            if wire_id == outer_wire_id and INCLUDE_OUTER_WIRES:
+                outer_loop += generate_wire_framework(wire, wire_ori, shape_maps)
+            elif wire_id != outer_wire_id and INCLUDE_INNER_WIRES:
+                inner_loops.append(generate_wire_framework(wire, wire_ori, shape_maps))
             else:
-                inner_loops.append(generate_wire_framework(wire, face_ori, shape_maps))
+                pass
             ex.Next()
 
         return face_framework
@@ -155,8 +160,9 @@ def factory(type):
     else:
         raise Exception('factory() error - unknown sampler type')
     def sampler(path):
-        print('>> start sampling \'', path, '\'', sep='')
-        compound = read_step_file(path)
+        print('>> loading step file \'', path, '\'', sep='')
+        compound = read_step_file(path, verbosity=False)
+        print('>> start sampling...')
         shape_maps = generate_shape_maps(compound)
         #TODO different sampler methods
         edge_meshes = sample_all_edges(compound, shape_maps)
