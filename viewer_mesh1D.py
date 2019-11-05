@@ -1,26 +1,28 @@
 import os
 import glob
 import numpy as np
+import pickle
 
 import pyglet
 from pyglet.gl import *
 from pyglet.window import key
 from pyglet.window import mouse
 
+import mesh1D
+from mesh1D import Mesh1D
+
 ## config constants  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 INPUT_DIR = 'tmp'
 DEFAULT_X = 1280
 DEFAULT_Y = 720
-ZOOM_DEFAULT = 1.1
+ZOOM_DEFAULT = 1.3
 ZOOM_STEP = 0.1
 ROTATION_DEFAULT = 0
 ROTATION_STEP = 10
 TILT_DEFAULT = 0
 
 ## global variables  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-meshes = list()
-lines = list()
-bounding_box = tuple()
+meshes = []
 window = pyglet.window.Window(DEFAULT_X, DEFAULT_Y,
                               fullscreen=False,
                               resizable=True,
@@ -29,6 +31,7 @@ window_caption = 'Delaunay Surface Mesh Refinement'
 
 flags = {
     'draw_bounding_box' : True,
+    'draw_vertices' : True,
     'draw_lines' : True
 }
 draw_mesh_index = 0
@@ -36,66 +39,14 @@ zoom = ZOOM_DEFAULT
 rotation = ROTATION_DEFAULT
 tilt = TILT_DEFAULT
 
-class Mesh1D:
-    def __init__(self, name):
-        self.name = name
-        self.lines = list()
-        self.bounding_box = (
-            float('inf'), float('-inf'),
-            float('inf'), float('-inf'),
-            float('inf'), float('-inf')
-        )
-    def get_bb_size(self):
-        x_min, x_max, y_min, y_max, z_min, z_max = self.bounding_box
-        return (x_max-x_min, y_max-y_min, z_max-z_min)
-    def get_bb_size_factor(self):
-        return np.linalg.norm(self.get_bb_size())
-    def get_bb_center(self):
-        x_min, x_max, y_min, y_max, z_min, z_max = self.bounding_box
-        cog = np.array((x_max-x_min, y_max-y_min, z_max-z_min)) / 2
-        return np.array((x_min, y_min, z_min)) + cog
-
-# lines are a tuple of two points, which are lists of coordinate values
-# returns a list of those lines
 def load_meshes_from_files():
-    def load_mesh_from_file(path):
-        def update_bounding_box(bounding_box, p):
-            assert len(p) == 3
-            x_min, x_max, y_min, y_max, z_min, z_max = bounding_box
-            if p[0] < x_min:
-                x_min = p[0]
-            if p[0] > x_max:
-                x_max = p[0]
-            if p[1] < y_min:
-                y_min = p[1]
-            if p[1] > y_max:
-                y_max = p[1]
-            if p[2] < z_min:
-                z_min = p[2]
-            if p[2] > z_max:
-                z_max = p[2]
-            return x_min, x_max, y_min, y_max, z_min, z_max
-        lines = list()
-        bounding_box = (
-            float('inf'), float('-inf'),
-            float('inf'), float('-inf'),
-            float('inf'), float('-inf')
-        )
-        with open(path, 'r') as f:
-            for l in f:
-                fl = [float(i) for i in l.split()]
-                bounding_box = update_bounding_box(bounding_box, fl[0:3])
-                bounding_box = update_bounding_box(bounding_box, fl[3:])
-                line = (fl[0:3], fl[3:])
-                lines.append(line)
-        return lines, bounding_box
     global meshes
     meshes.clear()
-    files = sorted(glob.glob(os.path.join(INPUT_DIR, '**/*.lines')), reverse=True)
+    files = sorted(glob.glob(os.path.join(INPUT_DIR, '**/*'+mesh1D.FILE_EXTENSION)), reverse=True)
     for path in files:
-        new_mesh = Mesh1D(name=path)
-        new_mesh.lines, new_mesh.bounding_box = load_mesh_from_file(path)
-        meshes.append(new_mesh)
+        loaded_mesh1D = pickle.load(open(path, 'rb'))
+        loaded_mesh1D.name = path
+        meshes.append(loaded_mesh1D)
 
 def resetProjectionMatrix(width):
     w = width
@@ -142,6 +93,8 @@ def on_key_press(symbol, modifiers):
         rotation += ROTATION_STEP
     if symbol == key.U and modifiers == 0:
         load_meshes_from_files()
+    if symbol == key.V and modifiers == 0:
+        flags['draw_vertices'] = not flags['draw_vertices']
     if symbol == key.B and modifiers == 0:
         flags['draw_bounding_box'] = not flags['draw_bounding_box']
     if symbol == key.N and modifiers == 0:
@@ -152,10 +105,10 @@ def on_key_press(symbol, modifiers):
 
 @window.event
 def on_draw():
-    def set_modelview(mesh):
+    def set_modelview(mesh1D):
         global rotation, tilt
-        scale_factor = 1.0/mesh.get_bb_size_factor()
-        center = mesh.get_bb_center()
+        scale_factor = 1.0/mesh1D.get_bb_size_factor()
+        center = mesh1D.get_bb_center()
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
         glRotatef(tilt, 1.0, 0.0, 0.0)
@@ -163,8 +116,8 @@ def on_draw():
         glScalef(scale_factor, scale_factor, scale_factor)
         glTranslatef(-center[0], -center[1], -center[2])
         pass
-    def draw_bb(mesh):
-        bounding_box = mesh.bounding_box
+    def draw_bb(mesh1D):
+        bounding_box = mesh1D.bounding_box
         x_min, x_max, y_min, y_max, z_min, z_max = bounding_box
         glColor3f(0.5, 0.5, 0.5)
         glBegin(GL_LINE_LOOP)
@@ -189,15 +142,27 @@ def on_draw():
         glVertex3f(x_min, y_max, z_min)
         glVertex3f(x_min, y_max, z_max)
         glEnd()
-    def draw_mesh(mesh):
-        lines = mesh.lines
+    def draw_mesh(mesh1D):
+        def draw_wire_mesh(vertices, wire_mesh):
+            glBegin(GL_LINE_LOOP)
+            for vi in wire_mesh:
+                x, y, z = vertices[vi]
+                glVertex3f(x, y, z)
+            glEnd()
+        vertices = mesh1D.vertices
+        face_meshes = mesh1D.face_meshes
         glColor3f(1.0, 1.0, 1.0)
-        glBegin(GL_LINES)
-        for line in lines:
-            x0, y0, z0 = line[0]
-            x1, y1, z1 = line[1]
-            glVertex3f(x0, y0, z0)
-            glVertex3f(x1, y1, z1)
+        for face_mesh in face_meshes:
+            outer_wire_mesh, inner_wire_meshes = face_mesh
+            draw_wire_mesh(vertices, outer_wire_mesh)
+            for inner_wire_mesh in inner_wire_meshes:
+                draw_wire_mesh(vertices, inner_wire_mesh)
+    def draw_vertices(mesh1D):
+        glColor3f(1.0, 0.0, 0.0)
+        glBegin(GL_POINTS)
+        for v in mesh1D.vertices:
+            x, y, z = v
+            glVertex3f(x, y, z)
         glEnd()
     def draw_label(text):
         label = pyglet.text.Label(text,
@@ -212,15 +177,17 @@ def on_draw():
     window.set_caption(window_caption)
     if len(meshes) == 0:
         return
-    mesh = meshes[draw_mesh_index]
+    mesh1D = meshes[draw_mesh_index]
     glClear(GL_COLOR_BUFFER_BIT)
     resetProjectionMatrix(zoom)
-    set_modelview(mesh)
+    set_modelview(mesh1D)
     if flags['draw_bounding_box']:
-        draw_bb(mesh)
+        draw_bb(mesh1D)
     if flags['draw_lines']:
-        draw_mesh(mesh)
-    draw_label(mesh.name)
+        draw_mesh(mesh1D)
+    if flags['draw_vertices']:
+        draw_vertices(mesh1D)
+    draw_label(mesh1D.name)
 
 if __name__ == '__main__':
     load_meshes_from_files()
