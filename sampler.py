@@ -11,6 +11,7 @@ model mesh (1D):
     tuple of...
     ...list of vertices which are lists of 3 floats
     ...list of indexed 1-dim. meshes of each model face
+    ...surface type string
 face mesh (1D):
     tuple of...
     ...outer boundary vertex loop
@@ -23,7 +24,8 @@ import numpy as np
 import os
 import pickle
 
-from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
+from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+from OCC.Core.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BezierSurface, GeomAbs_BSplineSurface, GeomAbs_SurfaceOfRevolution, GeomAbs_SurfaceOfExtrusion, GeomAbs_OffsetSurface, GeomAbs_OtherSurface
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from OCC.Core.ShapeAnalysis import shapeanalysis
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FORWARD, TopAbs_REVERSED
@@ -35,13 +37,29 @@ from OCC.Extend.TopologyUtils import TopologyExplorer
 
 from mesh1D import Mesh1D, FILE_EXTENSION
 
+SURFACE_TYPE_STRINGS = {
+    GeomAbs_Plane :               'Plane',
+    GeomAbs_Cylinder :            'Cylinder',
+    GeomAbs_Cone :                'Cone',
+    GeomAbs_Sphere :              'Sphere',
+    GeomAbs_Torus :               'Torus',
+    GeomAbs_BezierSurface :       'BezierSurface',
+    GeomAbs_BSplineSurface :      'BSplineSurface',
+    GeomAbs_SurfaceOfRevolution : 'SurfaceOfRevolution',
+    GeomAbs_SurfaceOfExtrusion :  'SurfaceOfExtrusion',
+    GeomAbs_OffsetSurface :       'OffsetSurface',
+    GeomAbs_OtherSurface :        'OtherSurface'
+}
+
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 PATH_BOX = '../resources/step/boxWithHole.step'
-PATH_X = '../resources/step/surface_filling.step'
+PATH_SURFFIL = '../resources/step/surface_filling.step'
+PATH_FILLET = '../resources/step/fillet.step'
 PATH_42 = '../resources/abc/step/00090042/00090042_1cbd5c59fb8c0895c3599d4d_step_007.step'
 PATH_111 = '../resources/abc/step/00090111/00090111_7eac35f07183d39b4da202d3_step_000.step'
 PATH_99999 = '../resources/abc/step/00099999/00099999_df6629a908dec75f8a69bda7_step_001.step'
-INPUT_PATH = PATH_99999
+PATH_98613 = '../resources/abc/step/00098613/00098613_56d3ec39e4b0747e94b812ee_step_007.step'
+INPUT_PATH = PATH_98613
 
 class SAMPLER_TYPE: # enum for calling sampler factory
     SIMPLE = 0
@@ -57,7 +75,7 @@ TIMESTAMP = datetime.datetime.now()
 PREFIX_SHORT = TIMESTAMP.strftime('%y%m%d_%H%M%S')
 PREFIX_LONG = TIMESTAMP.strftime('%y%m%d_%H%M%S_%f')
 #config
-NUMBER_OF_SAMPLES = 30
+NUMBER_OF_SAMPLES = 20
 INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
 SIMPLIFY_VERTEX_LIST = False # removes doubly vertices; performance impact
@@ -81,9 +99,10 @@ def sample_all_edges(compound, shape_maps):
         p_length = lp - fp
         assert NUMBER_OF_SAMPLES > 1
         for i in range(0, NUMBER_OF_SAMPLES):
-            parameter = fp + i * (p_length / (NUMBER_OF_SAMPLES-1))
             if i == NUMBER_OF_SAMPLES-1:
                 parameter = lp
+            else:
+                parameter = fp + i * (p_length / (NUMBER_OF_SAMPLES-1))
             point = curve.Value(parameter)
             edge_mesh.append([point.X(), point.Y(), point.Z()])
         return edge_mesh
@@ -170,8 +189,9 @@ def generate_mesh_framework(compound, shape_maps):
                 ex.Next()
             return wire_framework
         _, wire_map, _ = shape_maps
-        face_framework = (list(), list())
-        outer_loop, inner_loops = face_framework
+        face_type = BRepAdaptor_Surface(face).GetType()
+        face_framework = (list(), list(), SURFACE_TYPE_STRINGS[face_type])
+        outer_loop, inner_loops, _ = face_framework
         ex = TopExp_Explorer(face, TopAbs_WIRE)
         outer_wire_id = wire_map.FindIndex(shapeanalysis.OuterWire(face))
         while ex.More():
@@ -185,7 +205,6 @@ def generate_mesh_framework(compound, shape_maps):
             else:
                 pass
             ex.Next()
-
         return face_framework
     model_framework = list()
     ex = TopologyExplorer(compound)
@@ -210,12 +229,12 @@ def combine_framework_with_edge_meshes(framework, edge_meshes):
         return wire_mesh
     face_meshes = list()
     for face in framework:
-        outer_wire, inner_wirees = face
+        outer_wire, inner_wirees, face_type = face
         new_outer = process_wire_framework(outer_wire, edge_meshes)
         new_inner = list()
         for inner_wire in inner_wirees:
             new_inner.append(process_wire_framework(inner_wire, edge_meshes))
-        face_meshes.append((new_outer, new_inner))
+        face_meshes.append((new_outer, new_inner, face_type))
     return face_meshes
 
 def factory(type):
@@ -277,5 +296,5 @@ def write_mesh_to_file(mesh1D):
 if __name__ == '__main__':
     sampler = factory(SAMPLER_TYPE.SIMPLE)
     mesh1D = sampler(INPUT_PATH)
-    write_mesh_to_file(mesh1D)
     # print('no doubly vertices per loop:', noDoublyLoopInsertions(mesh1D))
+    write_mesh_to_file(mesh1D)

@@ -7,6 +7,7 @@ face_meshes: list of indexed face meshes
                         "=> tuple of...
                            ...a index loop of the outer boundary
                            ...a list of index loops for all inner boundaries
+                           ...surface type string
 bounding_box: tuple of coordinate value ranges computed based on vertices
 """
 import numpy as np
@@ -58,3 +59,7 @@ class Mesh1D:
         x_min, x_max, y_min, y_max, z_min, z_max = self.bounding_box
         cog = np.array((x_max-x_min, y_max-y_min, z_max-z_min)) / 2
         return np.array((x_min, y_min, z_min)) + cog
+
+    def get_face_type(self, index):
+        _, _, face_type = self.face_meshes[index]
+        return face_type

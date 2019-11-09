@@ -2,11 +2,11 @@ import os
 import glob
 import numpy as np
 import pickle
+import sys
 
 import pyglet
 from pyglet.gl import *
-from pyglet.window import key
-from pyglet.window import mouse
+from pyglet.window import key, mouse
 
 import mesh1D
 from mesh1D import Mesh1D
@@ -18,7 +18,6 @@ DEFAULT_Y = 720
 ZOOM_DEFAULT = 100
 ZOOM_STEP = ZOOM_DEFAULT / 10
 SAVE_ZONE_FACTOR = 0.8 # scale weight for model size to window ratio
-ROTATION_DEFAULT = 0
 ROTATION_STEP_SLOW = 1
 ROTATION_STEP_FAST = 5
 TILT_DEFAULT = 0
@@ -38,12 +37,15 @@ flags = {
     'arrow_mode' : False, # draw lines as arrows; only in individual face mode
     'mesh_drawn_since_last_face_index_change' : False # avoids skipping faces while flipping through
 }
-draw_mesh_index = 0
-draw_face_index = 0 # 0: all faces; >1: select individual face
-direction_of_flight = np.array([0.0, 0.0, 1.0])
-zoom = ZOOM_DEFAULT
-rotation = ROTATION_DEFAULT
-tilt = TILT_DEFAULT
+gvars = {
+    'mesh_index' : 0,
+    'face_index' : 0, # 0: all faces; >1: select individual face
+    'dof' : np.array([0.0, 0.0, 1.0]), # direction of flight
+    'zoom' : ZOOM_DEFAULT,
+    'rotation' : np.array([0.0, 0.0, 0.0]),
+    'tilt' : TILT_DEFAULT,
+    'drag' : np.array([0.0, 0.0, 0.0])
+}
 
 def load_meshes_from_files():
     global meshes
@@ -54,60 +56,53 @@ def load_meshes_from_files():
         loaded_mesh1D.name = path
         meshes.append(loaded_mesh1D)
 
-def resetProjectionMatrix(width):
+def set_projection(width):
     w = width
     h = w / (window.width/window.height)
+    d = 99999.0
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
-    glOrtho(-w/2, w/2, -h/2, h/2, -w, w)
+    glOrtho(-w/2, w/2, -h/2, h/2, -d/2, d/2)
     glMatrixMode(GL_MODELVIEW)
 
 @window.event
 def on_resize(width, height):
     glViewport(0, 0, width, height)
-    resetProjectionMatrix(width)
     return pyglet.event.EVENT_HANDLED
 
-def apply_to_rotation(value):
-    global rotation
-    if rotation + value < 0:
-        rotation = 360 + value
-    elif rotation + value > 360:
-        rotation = value
-    elif rotation + value == 360:
-            rotation = 0
+def apply_to_rotation(value, axis):
+    global gvars
+    if gvars['rotation'][axis] + value < 0:
+        gvars['rotation'][axis] = 360 + value
+    elif gvars['rotation'][axis] + value > 360:
+        gvars['rotation'][axis] = value
+    elif gvars['rotation'][axis] + value == 360:
+            gvars['rotation'][axis] = 0
     else:
-        rotation += value
+        gvars['rotation'][axis] += value
 
 @window.event
 def on_text_motion(motion):
-    def apply_to_zoom(value):
-        global zoom
-        if zoom + value < 1:
-            zoom = 1
-        else:
-            zoom += value
-        resetProjectionMatrix(window.width)
     def apply_to_face_index(value):
-        global flags, draw_mesh_index, draw_face_index, meshes
+        global flags, gvars, meshes
         if flags['mesh_drawn_since_last_face_index_change']:
             flags['draw_mesh'] = True
-            number_of_faces = len(meshes[draw_mesh_index].face_meshes)
-            if draw_face_index + value >= 0 and draw_face_index + value <= number_of_faces:
-                draw_face_index += value
+            number_of_faces = len(meshes[gvars['mesh_index']].face_meshes)
+            if gvars['face_index'] + value >= 0 and gvars['face_index'] + value <= number_of_faces:
+                gvars['face_index'] += value
                 flags['mesh_drawn_since_last_face_index_change'] = False
     if motion == key.MOTION_UP:
-        apply_to_zoom(-ZOOM_STEP)
+        pass
     if motion == key.MOTION_DOWN:
-        apply_to_zoom(ZOOM_STEP)
+        pass
     if motion == key.MOTION_LEFT:
-        apply_to_rotation(-ROTATION_STEP_FAST)
+        apply_to_rotation(-ROTATION_STEP_FAST, 1)
     if motion == key.MOTION_PREVIOUS_WORD:
-        apply_to_rotation(-ROTATION_STEP_SLOW)
+        apply_to_rotation(-ROTATION_STEP_SLOW, 1)
     if motion == key.MOTION_RIGHT:
-        apply_to_rotation(ROTATION_STEP_FAST)
+        apply_to_rotation(ROTATION_STEP_FAST, 1)
     if motion == key.MOTION_NEXT_WORD:
-        apply_to_rotation(ROTATION_STEP_SLOW)
+        apply_to_rotation(ROTATION_STEP_SLOW, 1)
     if motion == key.MOTION_PREVIOUS_PAGE:
         apply_to_face_index(1)
     if motion == key.MOTION_NEXT_PAGE:
@@ -117,16 +112,18 @@ def on_text_motion(motion):
 @window.event
 def on_key_press(symbol, modifiers):
     def reset():
-        global zoom, rotation, tilt
-        zoom = ZOOM_DEFAULT
-        rotation = ROTATION_DEFAULT
-        tilt = TILT_DEFAULT
+        global gvars
+        if gvars['zoom'] != ZOOM_DEFAULT or np.linalg.norm(gvars['drag']) > 0:
+            gvars['zoom'] = ZOOM_DEFAULT
+            gvars['drag'] = np.array([0.0, 0.0, 0.0])
+        else:
+            gvars['rotation'] = np.array([0.0, 0.0, 0.0])
+            gvars['tilt'] = TILT_DEFAULT
     def apply_to_mesh_index(value):
-        global draw_mesh_index, draw_face_index, meshes
-        if draw_mesh_index + value >= 0 and draw_mesh_index + value < len(meshes):
-            draw_mesh_index += value
-            draw_face_index = 0
-    global draw_face_index, rotation, tilt, flags
+        global gvars, meshes
+        if gvars['mesh_index'] + value >= 0 and gvars['mesh_index']+ value < len(meshes):
+            gvars['mesh_index']+= value
+    global flags, gvars
     if modifiers == 0:
         if symbol == key.C:
             reset()
@@ -144,19 +141,47 @@ def on_key_press(symbol, modifiers):
             flags['draw_bounding_box'] = not flags['draw_bounding_box']
         if symbol == key.N:
             flags['draw_mesh'] = not flags['draw_mesh']
-            draw_face_index = 0
+            gvars['face_index'] = 0
         if symbol == key.T:
-            tilt = 10 if tilt == 0 else 0
+            gvars['tilt'] = 10 if gvars['tilt'] == 0 else 0
+        if symbol == key.X:
+            pass
     #return pyglet.event.EVENT_HANDLED # disables ESC termination handler
 
+@window.event
+def on_mouse_drag(x, y, dx, dy, button, modifiers):
+    global gvars
+    scale = gvars['zoom']/window.width
+    if button == mouse.LEFT and modifiers == 0:
+        print(gvars['rotation'])
+        if gvars['rotation'][0] > 90 and gvars['rotation'][0] < 270:
+            apply_to_rotation(-1*dx*scale, 1)
+        else:
+            apply_to_rotation(dx*scale, 1)
+        apply_to_rotation(-1*dy*scale, 0)
+    if button == mouse.RIGHT or (button == mouse.LEFT and modifiers == key.MOD_ALT):
+        gvars['drag'][0] += dx * scale
+        gvars['drag'][1] += dy * scale
+
+@window.event
+def on_mouse_scroll(x, y, scroll_x, scroll_y):
+    def apply_to_zoom(value):
+        global gvars
+        if gvars['zoom'] + value < 1:
+            gvars['zoom'] = 1
+        else:
+            gvars['zoom'] += value
+    apply_to_zoom(3*scroll_y)
+    pass
+
 def update_direction_of_flight():
-    global direction_of_flight
+    global gvars
     matrix = (GLfloat * 16)()
     glGetFloatv(GL_MODELVIEW_MATRIX, matrix);
     x = matrix[2]
     y = matrix[6]
     z = matrix[10]
-    direction_of_flight = np.array([x, y, z])
+    gvars['dof'] = np.array([x, y, z])
 
 def normalize(vector, axis=-1, order=2):
     l2 = np.array(np.linalg.norm(vector, order, axis))
@@ -166,14 +191,18 @@ def normalize(vector, axis=-1, order=2):
 @window.event
 def on_draw():
     def set_modelview(mesh1D):
-        global rotation, tilt
+        global gvars
         scale = SAVE_ZONE_FACTOR * ZOOM_DEFAULT * 1.0/mesh1D.get_bb_size_factor()
+        drag = gvars['drag']
         center = mesh1D.get_bb_center()
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
-        glRotatef(tilt, 1.0, 0.0, 0.0)
-        glRotatef(rotation, 0.0, 1.0, 0.0)
+        glTranslatef(drag[0], drag[1], drag[2])
         glScalef(scale, scale, scale)
+        glRotatef(gvars['tilt'], 1.0, 0.0, 0.0)
+        glRotatef(gvars['rotation'][0], 1.0, 0.0, 0.0)
+        glRotatef(gvars['rotation'][1], 0.0, 1.0, 0.0)
+        glRotatef(gvars['rotation'][2], 0.0, 0.0, 1.0)
         glTranslatef(-center[0], -center[1], -center[2])
         update_direction_of_flight()
     def draw_bb(mesh1D):
@@ -206,12 +235,11 @@ def on_draw():
         def draw_wire_mesh(vertices, wire_mesh):
             def draw_line(v0, v1):
                 global flags
-                if flags['arrow_mode'] and draw_face_index > 0:
-                    global direction_of_flight
+                if flags['arrow_mode'] and gvars['face_index'] > 0:
                     v0 = np.array(v0)
                     v1 = np.array(v1)
                     v01 = v1-v0
-                    v_dof = normalize(direction_of_flight)
+                    v_dof = normalize(gvars['dof'])
                     v_norm = np.cross(v01, v_dof)
                     width_factor = 0.05
                     length_factor = 0.4
@@ -239,10 +267,10 @@ def on_draw():
         face_meshes = mesh1D.face_meshes
         glColor3f(1.0, 1.0, 1.0)
         for iFace in range(0, len(face_meshes)):
-            if draw_face_index > 0 and draw_face_index != iFace:
+            if gvars['face_index'] > 0 and gvars['face_index']-1 != iFace:
                 continue
             face_mesh = face_meshes[iFace]
-            outer_wire_mesh, inner_wire_meshes = face_mesh
+            outer_wire_mesh, inner_wire_meshes, _ = face_mesh
             draw_wire_mesh(vertices, outer_wire_mesh)
             for inner_wire_mesh in inner_wire_meshes:
                 draw_wire_mesh(vertices, inner_wire_mesh)
@@ -254,40 +282,48 @@ def on_draw():
             x, y, z = v
             glVertex3f(x, y, z)
         glEnd()
-    def draw_label(label_id, text):
-        font_size = 14
-        padding = 10
+    def draw_labels(mesh):
+        def draw_label(label_id, text):
+            font_size = 14
+            padding = 10
 
-        x_min = -window.width//2
-        x_pos = x_min + padding
+            x_min = -window.width//2
+            x_pos = x_min + padding
 
-        y_max = window.height//2
-        y_pos = (y_max - padding) - label_id * (font_size + padding)
+            y_max = window.height//2
+            y_pos = (y_max - padding) - label_id * (font_size + padding)
 
-        label = pyglet.text.Label(text, font_name='Arial', font_size=font_size,
-                                  x=x_pos, y=y_pos, anchor_x='left', anchor_y='top')
-        glMatrixMode(GL_MODELVIEW)
-        glLoadIdentity()
-        resetProjectionMatrix(window.width)
-        label.draw()
-    global flags, zoom, meshes, draw_mesh_index
+            label = pyglet.text.Label(text, font_name='Arial', font_size=font_size,
+                                      x=x_pos, y=y_pos, anchor_x='left', anchor_y='top')
+            glMatrixMode(GL_MODELVIEW)
+            glLoadIdentity()
+            set_projection(window.width)
+            label.draw()
+        global gvars
+        draw_label(0, 'draw mesh '+str(-1*gvars['mesh_index'])+' ('+mesh.name+')')
+        if gvars['face_index'] == 0:
+            draw_label(1, 'draw all faces')
+        else:
+            face_id_from_total = str(gvars['face_index']) + '/' + str(len(mesh.face_meshes))
+            face_type = mesh.get_face_type(gvars['face_index']-1)
+            draw_label(1, 'draw face '+face_id_from_total+' ('+face_type+')')
+    global flags, gvars
     window.set_caption(window_caption)
     if len(meshes) == 0:
         return
-    mesh1D = meshes[draw_mesh_index]
+    mesh1D = meshes[gvars['mesh_index']]
     glClear(GL_COLOR_BUFFER_BIT)
-    resetProjectionMatrix(zoom)
+    set_projection(gvars['zoom'])
     set_modelview(mesh1D)
     if flags['draw_bounding_box']:
         draw_bb(mesh1D)
-    if flags['draw_mesh'] and draw_face_index == 0:
+    if flags['draw_mesh'] and gvars['face_index'] == 0:
         draw_mesh(mesh1D)
     if flags['draw_vertices']:
         draw_vertices(mesh1D)
-    if flags['draw_mesh'] and draw_face_index != 0:
+    if flags['draw_mesh'] and gvars['face_index'] != 0:
         draw_mesh(mesh1D)
-    draw_label(0, mesh1D.name)
-    draw_label(1, 'face index: '+str(draw_face_index))
+    draw_labels(mesh1D)
 
 if __name__ == '__main__':
     load_meshes_from_files()
