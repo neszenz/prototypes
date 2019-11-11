@@ -9,7 +9,7 @@ from pyglet.gl import *
 from pyglet.window import key, mouse
 
 import mesh1D
-from mesh1D import Mesh1D
+from mesh1D import SuperVertex, Mesh1D
 
 ## config constants  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 INPUT_DIR = 'tmp'
@@ -153,7 +153,6 @@ def on_mouse_drag(x, y, dx, dy, button, modifiers):
     global gvars
     scale = gvars['zoom']/window.width
     if button == mouse.LEFT and modifiers == 0:
-        print(gvars['rotation'])
         if gvars['rotation'][0] > 90 and gvars['rotation'][0] < 270:
             apply_to_rotation(-1*dx*scale, 1)
         else:
@@ -233,11 +232,14 @@ def on_draw():
         glEnd()
     def draw_mesh(mesh1D):
         def draw_wire_mesh(vertices, wire_mesh):
-            def draw_line(v0, v1):
+            def draw_line(sv0, sv1):
                 global flags
+                v0 = sv0.toVec3()
+                v1 = sv1.toVec3()
+                # draw line segment
+                glVertex3f(v0[0], v0[1], v0[2])
+                glVertex3f(v1[0], v1[1], v1[2])
                 if flags['arrow_mode'] and gvars['face_index'] > 0:
-                    v0 = np.array(v0)
-                    v1 = np.array(v1)
                     v01 = v1-v0
                     v_dof = normalize(gvars['dof'])
                     v_norm = np.cross(v01, v_dof)
@@ -245,23 +247,16 @@ def on_draw():
                     length_factor = 0.4
                     va = v0 + (1-length_factor)*v01 + width_factor * v_norm
                     vb = v0 + (1-length_factor)*v01 + width_factor * -v_norm
-                    # draw line
-                    glVertex3f(v0[0], v0[1], v0[2])
-                    glVertex3f(v1[0], v1[1], v1[2])
-                    # draw arrow wing a
+                    # draw arrow wing a and b
                     glVertex3f(va[0], va[1], va[2])
                     glVertex3f(v1[0], v1[1], v1[2])
-                    # draw arrow wing b
                     glVertex3f(vb[0], vb[1], vb[2])
-                    glVertex3f(v1[0], v1[1], v1[2])
-                else:
-                    glVertex3f(v0[0], v0[1], v0[2])
                     glVertex3f(v1[0], v1[1], v1[2])
             glBegin(GL_LINES)
             for iVertex in range(0, len(wire_mesh)):
-                v0 = vertices[wire_mesh[iVertex]]
-                v1 = vertices[wire_mesh[(iVertex+1)%len(wire_mesh)]]
-                draw_line(v0, v1)
+                sv0 = vertices[wire_mesh[iVertex]]
+                sv1 = vertices[wire_mesh[(iVertex+1)%len(wire_mesh)]]
+                draw_line(sv0, sv1)
             glEnd()
         vertices = mesh1D.vertices
         face_meshes = mesh1D.face_meshes
@@ -278,8 +273,8 @@ def on_draw():
     def draw_vertices(mesh1D):
         glColor3f(1.0, 0.0, 0.0)
         glBegin(GL_POINTS)
-        for v in mesh1D.vertices:
-            x, y, z = v
+        for sv in mesh1D.vertices:
+            x, y, z = sv.toVec3()
             glVertex3f(x, y, z)
         glEnd()
     def draw_labels(mesh):

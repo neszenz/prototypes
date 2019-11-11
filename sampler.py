@@ -35,7 +35,7 @@ from OCC.Display.SimpleGui import init_display
 from OCC.Extend.DataExchange import read_step_file, write_step_file
 from OCC.Extend.TopologyUtils import TopologyExplorer
 
-from mesh1D import Mesh1D, FILE_EXTENSION
+from mesh1D import SuperVertex, Mesh1D, FILE_EXTENSION
 
 SURFACE_TYPE_STRINGS = {
     GeomAbs_Plane :               'Plane',
@@ -104,7 +104,8 @@ def sample_all_edges(compound, shape_maps):
             else:
                 parameter = fp + i * (p_length / (NUMBER_OF_SAMPLES-1))
             point = curve.Value(parameter)
-            edge_mesh.append([point.X(), point.Y(), point.Z()])
+            sv = SuperVertex(x=point.X(), y=point.Y(), z=point.Z())
+            edge_mesh.append(sv)
         return edge_mesh
     _, _, edge_map = shape_maps
     edge_meshes = {}

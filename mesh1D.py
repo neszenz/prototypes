@@ -2,7 +2,7 @@
 This class represents the results of the sampling process.
 
 name: path to the sampled step file
-vertices: a complete list of all sampled vertices
+vertices: a complete list of all samples as SuperVertices
 face_meshes: list of indexed face meshes
                         "=> tuple of...
                            ...a index loop of the outer boundary
@@ -20,10 +20,26 @@ BOUNDING_BOX_DEFAULT = (
 
 FILE_EXTENSION = '.mesh1D'
 
+class SuperVertex:
+    def __init__(self, x=0.0, y=0.0, z=0.0, u=0.0, v=0.0, face_id=0):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.u = u
+        self.v = v
+        self.face_id = face_id
+
+    def toVec2(self):
+        return np.array([self.u, self.v])
+
+    def toVec3(self):
+        return np.array([self.x, self.y, self.z])
+
 class Mesh1D:
     def __init__(self, name, vertices, face_meshes):
         self.name = name
         self.vertices = vertices
+        assert all(isinstance(v, SuperVertex) for v in self.vertices)
         self.face_meshes = face_meshes
         self.bounding_box = BOUNDING_BOX_DEFAULT
         self.update_bb()
@@ -34,18 +50,18 @@ class Mesh1D:
     def update_bb(self):
         x_min, x_max, y_min, y_max, z_min, z_max = BOUNDING_BOX_DEFAULT
         for v in self.vertices:
-            if v[0] < x_min:
-                x_min = v[0]
-            if v[0] > x_max:
-                x_max = v[0]
-            if v[1] < y_min:
-                y_min = v[1]
-            if v[1] > y_max:
-                y_max = v[1]
-            if v[2] < z_min:
-                z_min = v[2]
-            if v[2] > z_max:
-                z_max = v[2]
+            if v.x < x_min:
+                x_min = v.x
+            if v.x > x_max:
+                x_max = v.x
+            if v.y < y_min:
+                y_min = v.y
+            if v.y > y_max:
+                y_max = v.y
+            if v.z < z_min:
+                z_min = v.z
+            if v.z > z_max:
+                z_max = v.z
         self.bounding_box = x_min, x_max, y_min, y_max, z_min, z_max
 
     def get_bb_size(self):
