@@ -234,8 +234,8 @@ def on_draw():
         def draw_wire_mesh(vertices, wire_mesh):
             def draw_line(sv0, sv1):
                 global flags
-                v0 = sv0.toVec3()
-                v1 = sv1.toVec3()
+                v0 = sv0.to_vec3()
+                v1 = sv1.to_vec3()
                 # draw line segment
                 glVertex3f(v0[0], v0[1], v0[2])
                 glVertex3f(v1[0], v1[1], v1[2])
@@ -274,7 +274,7 @@ def on_draw():
         glColor3f(1.0, 0.0, 0.0)
         glBegin(GL_POINTS)
         for sv in mesh1D.vertices:
-            x, y, z = sv.toVec3()
+            x, y, z = sv.to_vec3()
             glVertex3f(x, y, z)
         glEnd()
     def draw_labels(mesh):

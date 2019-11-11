@@ -29,11 +29,22 @@ class SuperVertex:
         self.v = v
         self.face_id = face_id
 
-    def toVec2(self):
+    def to_vec2(self):
         return np.array([self.u, self.v])
-
-    def toVec3(self):
+    def to_vec3(self):
         return np.array([self.x, self.y, self.z])
+
+    def allclose_vec2(self, other):
+        return np.allclose(self.to_vec2(), other.to_vec2())
+    def allclose_vec3(self, other):
+        return np.allclose(self.to_vec3(), other.to_vec3())
+    def __eq__(self, other):
+        return self.allclose_vec2(other) and self.allclose_vec3(other) and self.face_id == other.face_id
+
+    def __str__(self):
+        return '(' + str(self.to_vec3()) + ', ' + str(self.to_vec2()) + ', ' + str(self.face_id) + ')'
+    def __repr__(self):
+        return self.__str__()
 
 class Mesh1D:
     def __init__(self, name, vertices, face_meshes):
@@ -63,14 +74,11 @@ class Mesh1D:
             if v.z > z_max:
                 z_max = v.z
         self.bounding_box = x_min, x_max, y_min, y_max, z_min, z_max
-
     def get_bb_size(self):
         x_min, x_max, y_min, y_max, z_min, z_max = self.bounding_box
         return (x_max-x_min, y_max-y_min, z_max-z_min)
-
     def get_bb_size_factor(self):
         return np.linalg.norm(self.get_bb_size())
-
     def get_bb_center(self):
         x_min, x_max, y_min, y_max, z_min, z_max = self.bounding_box
         cog = np.array((x_max-x_min, y_max-y_min, z_max-z_min)) / 2

@@ -75,10 +75,10 @@ TIMESTAMP = datetime.datetime.now()
 PREFIX_SHORT = TIMESTAMP.strftime('%y%m%d_%H%M%S')
 PREFIX_LONG = TIMESTAMP.strftime('%y%m%d_%H%M%S_%f')
 #config
-NUMBER_OF_SAMPLES = 20
+NUMBER_OF_SAMPLES = 50
 INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
-SIMPLIFY_VERTEX_LIST = False # removes doubly vertices; performance impact
+SIMPLIFY_VERTEX_LIST = False # removes doubly vertices (cylinders); big performance impact
 
 ## function body = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 def generate_shape_maps(compound):
@@ -90,106 +90,25 @@ def generate_shape_maps(compound):
     topexp.MapShapes(compound, TopAbs_EDGE, edge_map)
     return (face_map, wire_map, edge_map)
 
-def sample_all_edges(compound, shape_maps):
-    def generate_mesh_from_edge(edge, shape_maps):
-        edge_mesh = list()
-        curve = BRepAdaptor_Curve(edge)
-        fp = curve.FirstParameter()
-        lp = curve.LastParameter()
-        p_length = lp - fp
-        assert NUMBER_OF_SAMPLES > 1
-        for i in range(0, NUMBER_OF_SAMPLES):
-            if i == NUMBER_OF_SAMPLES-1:
-                parameter = lp
-            else:
-                parameter = fp + i * (p_length / (NUMBER_OF_SAMPLES-1))
-            point = curve.Value(parameter)
-            sv = SuperVertex(x=point.X(), y=point.Y(), z=point.Z())
-            edge_mesh.append(sv)
-        return edge_mesh
-    _, _, edge_map = shape_maps
-    edge_meshes = {}
-    number_of_edges = TopologyExplorer(compound).number_of_edges()
-    for edge_id in range(1, number_of_edges+1):
-        edge = edge_map.FindKey(edge_id)
-        edge_mesh = generate_mesh_from_edge(edge, shape_maps)
-        edge_meshes[edge_id] = edge_mesh
-    return edge_meshes
-
-def indexed_edge_meshes_from(edge_meshes):
-    def get_vertex_index(vertices, vertex):
-        for iVertex in range(0, len(vertices)):
-            v = vertices[iVertex]
-            if np.allclose(v, vertex):
-                return iVertex
-        return -1
-    def removeDoubles(vertices):
-        remove_map = []
-        number_of_vertices = len(vertices)
-        i = 0
-        while i < number_of_vertices:
-            vi = vertices[i]
-            j = i+1
-            while j < number_of_vertices:
-                vj = vertices[j]
-                if np.allclose(vi, vj):
-                    remove_map.append((j, i))
-                    del vertices[j]
-                    number_of_vertices -= 1
-                else:
-                    j += 1
-            i += 1
-        return remove_map
-    def updateIndeces(edge_meshes, remove_map):
-        for edge_id in edge_meshes:
-            edge_mesh = edge_meshes[edge_id]
-            for iIndex in range(0, len(edge_mesh)):
-                for pair in remove_map:
-                    i_removed, i_mapped = pair
-                    if edge_mesh[iIndex] == i_removed:
-                        edge_mesh[iIndex] = i_mapped
-                    elif edge_mesh[iIndex] > i_removed:
-                        edge_mesh[iIndex] -= 1
-    vertices = []
-    indexed_edge_meshes = {}
-    for edge_id in edge_meshes:
-        edge_mesh = edge_meshes[edge_id]
-        indexed_edge_mesh = []
-        for vertex in edge_mesh:
-            vertex_index = len(vertices)
-            vertices.append(vertex)
-            assert vertex_index >= 0
-            indexed_edge_mesh.append(vertex_index)
-        assert len(edge_mesh) == len(indexed_edge_mesh)
-        indexed_edge_meshes[edge_id] = indexed_edge_mesh
-    assert len(edge_meshes) == len(indexed_edge_meshes)
-    if SIMPLIFY_VERTEX_LIST:
-        old_num_of_vertices = len(vertices)
-        remove_map = removeDoubles(vertices)
-        assert old_num_of_vertices == len(vertices) + len(remove_map)
-        print('simplifyed vertex list by', round(100*len(remove_map)/old_num_of_vertices), '%')
-        updateIndeces(indexed_edge_meshes, remove_map)
-    else:
-        print('vertex list not simplifyed, can contain doubly vertices')
-    return vertices, indexed_edge_meshes
-
 # same structure as model mesh, but wires consist of a list of tupels containing
-# infos about the edge for later matching with separately sampled edge meshes
+# infos about the edge for later replacement during actual sampling:
+# edge_info -> tuple(edge_id, face_id, need_reversed)
 def generate_mesh_framework(compound, shape_maps):
     def generate_face_framework(face, shape_maps):
-        def generate_wire_framework(wire, face_ori, shape_maps):
+        def generate_wire_framework(wire, face_id, wire_ori, shape_maps):
             _, _, edge_map = shape_maps
             wire_framework = list()
             ex = TopExp_Explorer(wire, TopAbs_EDGE)
             while ex.More():
                 edge = ex.Current()
                 edge_id = edge_map.FindIndex(edge)
-                need_reversed = edge.Orientation() != face_ori
-                edge_infos = (edge_id, need_reversed)
+                need_reversed = edge.Orientation() != wire_ori
+                edge_infos = (edge_id, face_id, need_reversed)
                 wire_framework.append(edge_infos)
                 ex.Next()
             return wire_framework
-        _, wire_map, _ = shape_maps
+        face_map, wire_map, _ = shape_maps
+        face_id = face_map.FindIndex(face)
         face_type = BRepAdaptor_Surface(face).GetType()
         face_framework = (list(), list(), SURFACE_TYPE_STRINGS[face_type])
         outer_loop, inner_loops, _ = face_framework
@@ -200,9 +119,9 @@ def generate_mesh_framework(compound, shape_maps):
             wire_id = wire_map.FindIndex(wire)
             wire_ori = wire.Orientation()
             if wire_id == outer_wire_id and INCLUDE_OUTER_WIRES:
-                outer_loop += generate_wire_framework(wire, wire_ori, shape_maps)
+                outer_loop += generate_wire_framework(wire, face_id, wire_ori, shape_maps)
             elif wire_id != outer_wire_id and INCLUDE_INNER_WIRES:
-                inner_loops.append(generate_wire_framework(wire, wire_ori, shape_maps))
+                inner_loops.append(generate_wire_framework(wire, face_id, wire_ori, shape_maps))
             else:
                 pass
             ex.Next()
@@ -217,43 +136,121 @@ def generate_mesh_framework(compound, shape_maps):
         model_framework.append(face_framework)
     return model_framework
 
-def combine_framework_with_edge_meshes(framework, edge_meshes):
-    def process_wire_framework(framework, edge_meshes):
-        wire_mesh = list()
-        for edge_info in framework:
-            edge_id, need_reversed = edge_info
-            edge_mesh = edge_meshes[edge_id].copy()
-            if need_reversed:
-                edge_mesh.reverse()
-            edge_mesh.pop()
-            wire_mesh += edge_mesh
+def edge_sampler_simple(edge_info, shape_maps):
+    edge_id, face_id, need_reversed = edge_info
+    _, _, edge_map = shape_maps
+    edge_mesh = []
+    if NUMBER_OF_SAMPLES < 2:
+        return edge_mesh
+    edge = edge_map.FindKey(edge_id)
+    curve = BRepAdaptor_Curve(edge)
+    fp = curve.FirstParameter()
+    lp = curve.LastParameter()
+    p_length = lp - fp
+    for i in range(0, NUMBER_OF_SAMPLES):
+        if i == NUMBER_OF_SAMPLES-1:
+            parameter = lp
+        else:
+            parameter = fp + i*(p_length / (NUMBER_OF_SAMPLES-1))
+        p = curve.Value(parameter)
+        sv = SuperVertex(x=p.X(), y=p.Y(), z=p.Z(), face_id=face_id)
+        edge_mesh.append(sv)
+    if need_reversed: # corrects origentation to keep edges consistent in wire
+        edge_mesh.reverse()
+    edge_mesh.pop() # remove last to connect with next edge mesh w/o double vertex
+    return edge_mesh
+def sample_edges_in_framework(framework, shape_maps, sampler_type):
+    def process_wire_framework(wire_framework, shape_maps, sampler_type):
+        wire_mesh = []
+        for edge_info in wire_framework:
+            if sampler_type == SAMPLER_TYPE.SIMPLE:
+                wire_mesh += edge_sampler_simple(edge_info, shape_maps)
+            else:
+                pass #TODO different sampler methods
         return wire_mesh
-    face_meshes = list()
-    for face in framework:
-        outer_wire, inner_wirees, face_type = face
-        new_outer = process_wire_framework(outer_wire, edge_meshes)
-        new_inner = list()
-        for inner_wire in inner_wirees:
-            new_inner.append(process_wire_framework(inner_wire, edge_meshes))
-        face_meshes.append((new_outer, new_inner, face_type))
+    face_meshes = []
+    for face_framework in framework:
+        outer_wire, inner_wire, face_type = face_framework
+        outer_wire_mesh = process_wire_framework(outer_wire, shape_maps, sampler_type)
+        inner_wire_meshes = []
+        for inner_wire in inner_wire:
+            inner_wire_meshes.append(process_wire_framework(inner_wire, shape_maps, sampler_type))
+        face_meshes.append((outer_wire_mesh, inner_wire_meshes, face_type))
     return face_meshes
 
-def factory(type):
-    if type in SAMPLER_TYPE.string_dict:
-        print('>> create sampler of type', SAMPLER_TYPE.string_dict[type])
+def make_face_meshes_indexed(face_meshes):
+    def removeDoubles(vertices):
+        remove_map = []
+        number_of_vertices = len(vertices)
+        i = 0
+        while i < number_of_vertices:
+            svi = vertices[i]
+            j = i+1
+            while j < number_of_vertices:
+                svj = vertices[j]
+                if svi == svj: # vec2, vec3 and face_id must be all close
+                    remove_map.append((j, i))
+                    del vertices[j]
+                    number_of_vertices -= 1
+                else:
+                    j += 1
+            i += 1
+        return remove_map
+    def updateIndices(indexed_face_meshes, remove_map):
+        def process_wire(wire_mesh, remove_map):
+            for iIndex in range(0, len(wire_mesh)):
+                for pair in remove_map:
+                    i_removed, i_mapped = pair
+                    if wire_mesh[iIndex] == i_removed:
+                        wire_mesh[iIndex] = i_mapped
+                    elif wire_mesh[iIndex] > i_removed:
+                        wire_mesh[iIndex] -= 1
+        for face_mesh in indexed_face_meshes:
+            outer_wire, inner_wires, _ = face_mesh
+            process_wire(outer_wire, remove_map)
+            for inner_wire in inner_wires:
+                process_wire(inner_wire, remove_map)
+    def process_wire(vertices, wire_mesh):
+        indexed_wire_mesh = []
+        for sv in wire_mesh:
+            vertex_index = len(vertices)
+            vertices.append(sv)
+            indexed_wire_mesh.append(vertex_index)
+        return indexed_wire_mesh
+    vertices = []
+    indexed_face_meshes = []
+    for face_mesh in face_meshes:
+        outer_wire, inner_wires, face_id = face_mesh
+        indexed_outer_wire = process_wire(vertices, outer_wire)
+        indexed_inner_wires = []
+        for inner_wire in inner_wires:
+            indexed_inner_wires.append(process_wire(vertices, inner_wire))
+        indexed_face_meshes.append((indexed_outer_wire, indexed_inner_wires, face_id))
+    if SIMPLIFY_VERTEX_LIST:
+        print('simplifying vertex list...')
+        old_num_of_vertices = len(vertices)
+        remove_map = removeDoubles(vertices)
+        assert old_num_of_vertices == len(vertices) + len(remove_map)
+        print('simplifyed vertex list by', round(100*len(remove_map)/old_num_of_vertices), '%')
+        updateIndices(indexed_face_meshes, remove_map)
+    else:
+        print('vertex list not simplifyed, can contain doubly vertices')
+    return vertices, indexed_face_meshes
+
+def factory(sampler_type):
+    if sampler_type in SAMPLER_TYPE.string_dict:
+        print('>> create sampler of type', SAMPLER_TYPE.string_dict[sampler_type])
     else:
         raise Exception('factory() error - unknown sampler type')
-    #TODO different sampler methods
     def sampler(path):
         print('>> loading step file \'', path, '\'', sep='')
         compound = read_step_file(path, verbosity=False)
         shape_maps = generate_shape_maps(compound)
-        print('>> start sampling...')
+        print('>> generating framework and sampling...')
         framework = generate_mesh_framework(compound, shape_maps)
-        edge_meshes = sample_all_edges(compound, shape_maps)
-        vertices, indexed_edge_meshes = indexed_edge_meshes_from(edge_meshes)
-        face_meshes = combine_framework_with_edge_meshes(framework, indexed_edge_meshes)
-        return Mesh1D(path, vertices, face_meshes)
+        face_meshes = sample_edges_in_framework(framework, shape_maps, sampler_type)
+        vertices, indexed_face_meshes = make_face_meshes_indexed(face_meshes)
+        return Mesh1D(path, vertices, indexed_face_meshes)
     return sampler
 
 def noDoublyLoopInsertions(mesh1D):
@@ -261,19 +258,20 @@ def noDoublyLoopInsertions(mesh1D):
         ok = True
         for i in range(0, len(wire_mesh)):
             iIndex = wire_mesh[i]
-            vi = mesh1D.vertices[iIndex]
+            svi = mesh1D.vertices[iIndex]
             for j in range(i+1, len(wire_mesh)):
                 jIndex = wire_mesh[j]
-                vj = mesh1D.vertices[jIndex]
-                if np.allclose(vi, vj):
-                    print('vertex', vi, 'occures both at', i, 'and', j)
+                svj = mesh1D.vertices[jIndex]
+                if svi == svj:
+                    print('vertex', svi, 'occures both at', i, 'and', j, end='')
+                    print(' (iIndex:', iIndex, ', jIndex:', jIndex, ')', sep='')
                     ok = False
         return ok
     ok = True
     for i in range(0, mesh1D.number_of_faces()):
         face_mesh = mesh1D.face_meshes[i]
         print('\nface', i)
-        outer_wire_mesh, inner_wire_meshes = face_mesh
+        outer_wire_mesh, inner_wire_meshes, _ = face_mesh
         if not checkWire(outer_wire_mesh):
             ok = False
         for inner_wire_mesh in inner_wire_meshes:
