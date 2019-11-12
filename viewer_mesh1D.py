@@ -80,6 +80,12 @@ def apply_to_rotation(value, axis):
             gvars['rotation'][axis] = 0
     else:
         gvars['rotation'][axis] += value
+def apply_to_zoom(value):
+    global gvars
+    if gvars['zoom'] + value < 1:
+        gvars['zoom'] = 1
+    else:
+        gvars['zoom'] += value
 
 @window.event
 def on_text_motion(motion):
@@ -92,9 +98,9 @@ def on_text_motion(motion):
                 gvars['face_index'] += value
                 flags['mesh_drawn_since_last_face_index_change'] = False
     if motion == key.MOTION_UP:
-        pass
+        apply_to_zoom(-ZOOM_STEP)
     if motion == key.MOTION_DOWN:
-        pass
+        apply_to_zoom(ZOOM_STEP)
     if motion == key.MOTION_LEFT:
         apply_to_rotation(-ROTATION_STEP_FAST, 1)
     if motion == key.MOTION_PREVIOUS_WORD:
@@ -164,14 +170,7 @@ def on_mouse_drag(x, y, dx, dy, button, modifiers):
 
 @window.event
 def on_mouse_scroll(x, y, scroll_x, scroll_y):
-    def apply_to_zoom(value):
-        global gvars
-        if gvars['zoom'] + value < 1:
-            gvars['zoom'] = 1
-        else:
-            gvars['zoom'] += value
     apply_to_zoom(3*scroll_y)
-    pass
 
 def update_direction_of_flight():
     global gvars
