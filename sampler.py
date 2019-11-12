@@ -24,6 +24,7 @@ import numpy as np
 import os
 import pickle
 
+from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCC.Core.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BezierSurface, GeomAbs_BSplineSurface, GeomAbs_SurfaceOfRevolution, GeomAbs_SurfaceOfExtrusion, GeomAbs_OffsetSurface, GeomAbs_OtherSurface
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
@@ -69,7 +70,7 @@ TIMESTAMP = datetime.datetime.now()
 PREFIX_SHORT = TIMESTAMP.strftime('%y%m%d_%H%M%S')
 PREFIX_LONG = TIMESTAMP.strftime('%y%m%d_%H%M%S_%f')
 
-NUMBER_OF_SAMPLES = 50
+NUMBER_OF_SAMPLES = 20 # only for SIMPLE sampling method
 INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
 SIMPLIFY_VERTEX_LIST = False # removes doubly vertices (cylinders); big performance impact
@@ -132,22 +133,23 @@ def generate_mesh_framework(compound, shape_maps):
 
 def edge_sampler_simple(edge_info, shape_maps):
     edge_id, face_id, need_reversed = edge_info
-    _, _, edge_map = shape_maps
+    face_map, _, edge_map = shape_maps
     edge_mesh = []
     if NUMBER_OF_SAMPLES < 2:
         return edge_mesh
+    face = face_map.FindKey(face_id)
     edge = edge_map.FindKey(edge_id)
-    curve = BRepAdaptor_Curve(edge)
-    fp = curve.FirstParameter()
-    lp = curve.LastParameter()
+    surface = BRepAdaptor_Surface(face)
+    curve, fp, lp = BRep_Tool.CurveOnSurface(edge, face)
     p_length = lp - fp
     for i in range(0, NUMBER_OF_SAMPLES):
         if i == NUMBER_OF_SAMPLES-1:
             parameter = lp
         else:
             parameter = fp + i*(p_length / (NUMBER_OF_SAMPLES-1))
-        p = curve.Value(parameter)
-        sv = SuperVertex(x=p.X(), y=p.Y(), z=p.Z(), face_id=face_id)
+        p2d = curve.Value(parameter)
+        p3d = surface.Value(p2d.X(), p2d.Y())
+        sv = SuperVertex(x=p3d.X(), y=p3d.Y(), z=p3d.Z(), u=p2d.X(), v=p2d.Y(), face_id=face_id)
         edge_mesh.append(sv)
     if need_reversed: # corrects origentation to keep edges consistent in wire
         edge_mesh.reverse()

@@ -29,20 +29,22 @@ class SuperVertex:
         self.v = v
         self.face_id = face_id
 
-    def to_vec2(self):
+    def UV_vec2(self):
         return np.array([self.u, self.v])
-    def to_vec3(self):
+    def UV_vec3(self):
+        return np.array([self.u, self.v, 0.0])
+    def XYZ_vec3(self):
         return np.array([self.x, self.y, self.z])
 
-    def allclose_vec2(self, other):
-        return np.allclose(self.to_vec2(), other.to_vec2())
-    def allclose_vec3(self, other):
-        return np.allclose(self.to_vec3(), other.to_vec3())
+    def allclose_UV(self, other):
+        return np.allclose(self.UV_vec2(), other.UV_vec2())
+    def allclose_XYZ(self, other):
+        return np.allclose(self.XYZ_vec3(), other.XYZ_vec3())
     def __eq__(self, other):
-        return self.allclose_vec2(other) and self.allclose_vec3(other) and self.face_id == other.face_id
+        return self.allclose_UV(other) and self.allclose_XYZ(other) and self.face_id == other.face_id
 
     def __str__(self):
-        return '(' + str(self.to_vec3()) + ', ' + str(self.to_vec2()) + ', ' + str(self.face_id) + ')'
+        return '(' + str(self.XYZ_vec3()) + ', ' + str(self.UV_vec2()) + ', ' + str(self.face_id) + ')'
     def __repr__(self):
         return self.__str__()
 

@@ -34,6 +34,7 @@ flags = {
     'draw_bounding_box' : True,
     'draw_vertices' : True,
     'draw_mesh' : True,
+    'draw_2d_mode' : False,
     'arrow_mode' : False, # draw lines as arrows; only in individual face mode
     'mesh_drawn_since_last_face_index_change' : False # avoids skipping faces while flipping through
 }
@@ -92,7 +93,6 @@ def on_text_motion(motion):
     def apply_to_face_index(value):
         global flags, gvars, meshes
         if flags['mesh_drawn_since_last_face_index_change']:
-            flags['draw_mesh'] = True
             number_of_faces = len(meshes[gvars['mesh_index']].face_meshes)
             if gvars['face_index'] + value >= 0 and gvars['face_index'] + value <= number_of_faces:
                 gvars['face_index'] += value
@@ -135,6 +135,8 @@ def on_key_press(symbol, modifiers):
             reset()
         if symbol == key.A:
             flags['arrow_mode'] = not flags['arrow_mode']
+        if symbol == key.F:
+            flags['draw_2d_mode'] = not flags['draw_2d_mode']
         if symbol == key.K:
             apply_to_mesh_index(1)
         if symbol == key.J:
@@ -147,7 +149,6 @@ def on_key_press(symbol, modifiers):
             flags['draw_bounding_box'] = not flags['draw_bounding_box']
         if symbol == key.N:
             flags['draw_mesh'] = not flags['draw_mesh']
-            gvars['face_index'] = 0
         if symbol == key.T:
             gvars['tilt'] = 10 if gvars['tilt'] == 0 else 0
         if symbol == key.X:
@@ -204,6 +205,8 @@ def on_draw():
         glTranslatef(-center[0], -center[1], -center[2])
         update_direction_of_flight()
     def draw_bb(mesh1D):
+        if flags['draw_2d_mode']:
+            return
         bounding_box = mesh1D.bounding_box
         x_min, x_max, y_min, y_max, z_min, z_max = bounding_box
         glColor3f(0.5, 0.5, 0.5)
@@ -233,8 +236,14 @@ def on_draw():
         def draw_wire_mesh(vertices, wire_mesh):
             def draw_line(sv0, sv1):
                 global flags
-                v0 = sv0.to_vec3()
-                v1 = sv1.to_vec3()
+                if flags['draw_2d_mode']:
+                    v0 = sv0.UV_vec3()
+                    v0[2] = -sv0.face_id
+                    v1 = sv1.UV_vec3()
+                    v1[2] = -sv1.face_id
+                else:
+                    v0 = sv0.XYZ_vec3()
+                    v1 = sv1.XYZ_vec3()
                 # draw line segment
                 glVertex3f(v0[0], v0[1], v0[2])
                 glVertex3f(v1[0], v1[1], v1[2])
@@ -268,13 +277,24 @@ def on_draw():
             draw_wire_mesh(vertices, outer_wire_mesh)
             for inner_wire_mesh in inner_wire_meshes:
                 draw_wire_mesh(vertices, inner_wire_mesh)
-        flags['mesh_drawn_since_last_face_index_change'] = True
     def draw_vertices(mesh1D):
+        current_face_collection = []
         glColor3f(1.0, 0.0, 0.0)
         glBegin(GL_POINTS)
         for sv in mesh1D.vertices:
-            x, y, z = sv.to_vec3()
+            if flags['draw_2d_mode']:
+                x, y, z = sv.UV_vec3()
+                z = -sv.face_id
+            else:
+                x, y, z = sv.XYZ_vec3()
+            if gvars['face_index'] == sv.face_id:
+                current_face_collection.append((x, y, z))
             glVertex3f(x, y, z)
+        if not flags['draw_mesh']:
+            glColor3f(1.0, 1.0, 0.0)
+            for v in current_face_collection:
+                x, y, z = v
+                glVertex3f(x, y, z)
         glEnd()
     def draw_labels(mesh):
         def draw_label(label_id, text):
@@ -318,6 +338,7 @@ def on_draw():
     if flags['draw_mesh'] and gvars['face_index'] != 0:
         draw_mesh(mesh1D)
     draw_labels(mesh1D)
+    flags['mesh_drawn_since_last_face_index_change'] = True
 
 if __name__ == '__main__':
     load_meshes_from_files()
