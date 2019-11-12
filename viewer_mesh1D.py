@@ -170,7 +170,7 @@ def on_mouse_drag(x, y, dx, dy, button, modifiers):
 
 @window.event
 def on_mouse_scroll(x, y, scroll_x, scroll_y):
-    apply_to_zoom(3*scroll_y)
+    apply_to_zoom(-3*scroll_y)
 
 def update_direction_of_flight():
     global gvars

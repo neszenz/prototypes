@@ -1,8 +1,8 @@
-""" 1D mesh sampler for step files
+""" 1D mesh sampler for STEP files
 Contains functionality to generate a 1-dimensional mesh from a given path to a
-step file.
+STEP file.
 
-A step model is made up of model faces, each with an underlying geometry. All
+A STEP model is made up of model faces, each with an underlying geometry. All
 model face boundaries in a step model are circular. Outer boundaries are
 oriented counterclockwise and inner ones clockwise.
 This leads to the following representation:
@@ -35,6 +35,7 @@ from OCC.Display.SimpleGui import init_display
 from OCC.Extend.DataExchange import read_step_file, write_step_file
 from OCC.Extend.TopologyUtils import TopologyExplorer
 
+import paths
 from mesh1D import SuperVertex, Mesh1D, FILE_EXTENSION
 
 SURFACE_TYPE_STRINGS = {
@@ -52,14 +53,7 @@ SURFACE_TYPE_STRINGS = {
 }
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-PATH_BOX = '../resources/step/boxWithHole.step'
-PATH_SURFFIL = '../resources/step/surface_filling.step'
-PATH_FILLET = '../resources/step/fillet.step'
-PATH_42 = '../resources/abc/step/00090042/00090042_1cbd5c59fb8c0895c3599d4d_step_007.step'
-PATH_111 = '../resources/abc/step/00090111/00090111_7eac35f07183d39b4da202d3_step_000.step'
-PATH_99999 = '../resources/abc/step/00099999/00099999_df6629a908dec75f8a69bda7_step_001.step'
-PATH_98613 = '../resources/abc/step/00098613/00098613_56d3ec39e4b0747e94b812ee_step_007.step'
-INPUT_PATH = PATH_98613
+INPUT_PATH = paths.PATH_98613
 
 class SAMPLER_TYPE: # enum for calling sampler factory
     SIMPLE = 0
@@ -74,7 +68,7 @@ OUTPUT_DIR = os.path.join('tmp', 'sampler')
 TIMESTAMP = datetime.datetime.now()
 PREFIX_SHORT = TIMESTAMP.strftime('%y%m%d_%H%M%S')
 PREFIX_LONG = TIMESTAMP.strftime('%y%m%d_%H%M%S_%f')
-#config
+
 NUMBER_OF_SAMPLES = 50
 INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
