@@ -56,6 +56,7 @@ def load_meshes_from_files():
         loaded_mesh1D = pickle.load(open(path, 'rb'))
         loaded_mesh1D.name = path
         meshes.append(loaded_mesh1D)
+    gvars['face_index'] = min(gvars['face_index'], meshes[gvars['mesh_index']].number_of_faces())
 
 def set_projection(width):
     w = width
@@ -129,6 +130,7 @@ def on_key_press(symbol, modifiers):
         global gvars, meshes
         if gvars['mesh_index'] + value >= 0 and gvars['mesh_index']+ value < len(meshes):
             gvars['mesh_index']+= value
+        gvars['face_index'] = min(gvars['face_index'], meshes[gvars['mesh_index']].number_of_faces())
     global flags, gvars
     if modifiers == 0:
         if symbol == key.C:
@@ -191,9 +193,14 @@ def normalize(vector, axis=-1, order=2):
 def on_draw():
     def set_modelview(mesh1D):
         global gvars
-        scale = SAVE_ZONE_FACTOR * ZOOM_DEFAULT * 1.0/mesh1D.get_bb_size_factor()
+        if flags['draw_2d_mode']:
+            size_factor = mesh1D.get_bb2D_size_factor()
+            center = mesh1D.get_bb2D_center()
+        else:
+            size_factor = mesh1D.get_bb3D_size_factor()
+            center = mesh1D.get_bb3D_center()
+        scale = SAVE_ZONE_FACTOR * ZOOM_DEFAULT * 1.0/size_factor
         drag = gvars['drag']
-        center = mesh1D.get_bb_center()
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
         glTranslatef(drag[0], drag[1], drag[2])
@@ -206,8 +213,9 @@ def on_draw():
         update_direction_of_flight()
     def draw_bb(mesh1D):
         if flags['draw_2d_mode']:
-            return
-        bounding_box = mesh1D.bounding_box
+            bounding_box = mesh1D.bounding_box2D
+        else:
+            bounding_box = mesh1D.bounding_box3D
         x_min, x_max, y_min, y_max, z_min, z_max = bounding_box
         glColor3f(0.5, 0.5, 0.5)
         glBegin(GL_LINE_LOOP)
@@ -238,9 +246,7 @@ def on_draw():
                 global flags
                 if flags['draw_2d_mode']:
                     v0 = sv0.UV_vec3()
-                    v0[2] = -sv0.face_id
                     v1 = sv1.UV_vec3()
-                    v1[2] = -sv1.face_id
                 else:
                     v0 = sv0.XYZ_vec3()
                     v1 = sv1.XYZ_vec3()
@@ -284,7 +290,6 @@ def on_draw():
         for sv in mesh1D.vertices:
             if flags['draw_2d_mode']:
                 x, y, z = sv.UV_vec3()
-                z = -sv.face_id
             else:
                 x, y, z = sv.XYZ_vec3()
             if gvars['face_index'] == sv.face_id:

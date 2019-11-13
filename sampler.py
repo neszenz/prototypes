@@ -75,7 +75,7 @@ INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
 SIMPLIFY_VERTEX_LIST = False # removes doubly vertices (cylinders); big performance impact
 
-## function body = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
+## functions = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 def generate_shape_maps(compound):
     face_map = TopTools_IndexedMapOfShape()
     wire_map = TopTools_IndexedMapOfShape()
@@ -87,23 +87,20 @@ def generate_shape_maps(compound):
 
 # same structure as model mesh, but wires consist of a list of tupels containing
 # infos about the edge for later replacement during actual sampling:
-# edge_info -> tuple(edge_id, face_id, need_reversed)
+# edge_info -> tuple(face, wire, edge)
 def generate_mesh_framework(compound, shape_maps):
     def generate_face_framework(face, shape_maps):
-        def generate_wire_framework(wire, face_id, wire_ori, shape_maps):
+        def generate_wire_framework(wire, face, shape_maps):
             _, _, edge_map = shape_maps
             wire_framework = list()
             ex = TopExp_Explorer(wire, TopAbs_EDGE)
             while ex.More():
                 edge = ex.Current()
-                edge_id = edge_map.FindIndex(edge)
-                need_reversed = edge.Orientation() != wire_ori
-                edge_infos = (edge_id, face_id, need_reversed)
-                wire_framework.append(edge_infos)
+                edge_info = (face, wire, edge)
+                wire_framework.append(edge_info)
                 ex.Next()
             return wire_framework
         face_map, wire_map, _ = shape_maps
-        face_id = face_map.FindIndex(face)
         face_type = BRepAdaptor_Surface(face).GetType()
         face_framework = (list(), list(), SURFACE_TYPE_STRINGS[face_type])
         outer_loop, inner_loops, _ = face_framework
@@ -112,11 +109,10 @@ def generate_mesh_framework(compound, shape_maps):
         while ex.More():
             wire = ex.Current()
             wire_id = wire_map.FindIndex(wire)
-            wire_ori = wire.Orientation()
             if wire_id == outer_wire_id and INCLUDE_OUTER_WIRES:
-                outer_loop += generate_wire_framework(wire, face_id, wire_ori, shape_maps)
+                outer_loop += generate_wire_framework(wire, face, shape_maps)
             elif wire_id != outer_wire_id and INCLUDE_INNER_WIRES:
-                inner_loops.append(generate_wire_framework(wire, face_id, wire_ori, shape_maps))
+                inner_loops.append(generate_wire_framework(wire, face, shape_maps))
             else:
                 pass
             ex.Next()
@@ -132,13 +128,12 @@ def generate_mesh_framework(compound, shape_maps):
     return model_framework
 
 def edge_sampler_simple(edge_info, shape_maps):
-    edge_id, face_id, need_reversed = edge_info
+    face, wire, edge = edge_info
     face_map, _, edge_map = shape_maps
     edge_mesh = []
     if NUMBER_OF_SAMPLES < 2:
         return edge_mesh
-    face = face_map.FindKey(face_id)
-    edge = edge_map.FindKey(edge_id)
+    face_id = face_map.FindIndex(face)
     surface = BRepAdaptor_Surface(face)
     curve, fp, lp = BRep_Tool.CurveOnSurface(edge, face)
     p_length = lp - fp
@@ -151,7 +146,8 @@ def edge_sampler_simple(edge_info, shape_maps):
         p3d = surface.Value(p2d.X(), p2d.Y())
         sv = SuperVertex(x=p3d.X(), y=p3d.Y(), z=p3d.Z(), u=p2d.X(), v=p2d.Y(), face_id=face_id)
         edge_mesh.append(sv)
-    if need_reversed: # corrects origentation to keep edges consistent in wire
+    # here, the edges orientation are made consistent with that of the wire
+    if edge.Orientation() != wire.Orientation(): # corrects origentation to keep edges consistent in wire
         edge_mesh.reverse()
     edge_mesh.pop() # remove last to connect with next edge mesh w/o double vertex
     return edge_mesh
@@ -163,6 +159,12 @@ def sample_edges_in_framework(framework, shape_maps, sampler_type):
                 wire_mesh += edge_sampler_simple(edge_info, shape_maps)
             else:
                 pass #TODO different sampler methods
+        # here, the model face orientation gets adapted by the mesh
+        if len(wire_framework) > 0:
+            face, _, _ = wire_framework[0]
+            face_map, _, _ = shape_maps
+            if face.Orientation() == TopAbs_REVERSED:
+                wire_mesh.reverse()
         return wire_mesh
     face_meshes = []
     for face_framework in framework:
