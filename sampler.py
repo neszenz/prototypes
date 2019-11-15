@@ -85,6 +85,16 @@ def generate_shape_maps(compound):
     topexp.MapShapes(compound, TopAbs_EDGE, edge_map)
     return (face_map, wire_map, edge_map)
 
+def project_to_XYZ(sv, path): #TODO super not final; temp!!1!
+    compound = read_step_file(path, verbosity=False)
+    face_map, _, _ = generate_shape_maps(compound)
+    face = face_map.FindKey(sv.face_id)
+    surface = BRepAdaptor_Surface(face)
+    xyz = surface.Value(sv.u, sv.v)
+    sv.x = xyz.X()
+    sv.y = xyz.Y()
+    sv.z = xyz.Z()
+
 # same structure as model mesh, but wires consist of a list of tupels containing
 # infos about the edge for later replacement during actual sampling:
 # edge_info -> tuple(face, wire, edge)
@@ -268,7 +278,7 @@ def noDoublyLoopInsertions(mesh1D):
     ok = True
     for i in range(0, mesh1D.number_of_faces()):
         face_mesh = mesh1D.face_meshes[i]
-        print('\nface', i)
+        print('face', i)
         outer_wire_mesh, inner_wire_meshes, _ = face_mesh
         if not checkWire(outer_wire_mesh):
             ok = False

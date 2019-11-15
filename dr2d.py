@@ -343,7 +343,7 @@ def chew93(pslg):
         iteration_counter += 1
         if iteration_counter > 1 and (iteration_counter-1) % 100 == 0:
             print(iteration_counter-1, 'iterations processed...')
-        render(cdt)#TODO remove
+        # render(cdt)#TODO remove
         # step 4: travel from any triangle vertex to c and return hit segment id
         c = calcCircumcenter(cdt, delta)
         hit = getIntersectingSegmentId(cdt, delta, c)
