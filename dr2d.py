@@ -1,6 +1,7 @@
 import math
 import numpy as np
-import pyrender
+if __name__ == '__main__':
+    import pyrender
 import triangle
 import trimesh
 

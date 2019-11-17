@@ -8,37 +8,25 @@ first step is to compute constrained Delaunay Triangulations w/ pytriangle and
 then apply my implementation of Chew's Surface Delaunay Refinement algorithm.
 """
 import numpy as np
+import os
+import pickle
 import triangle as shewchuck_triangle
 
 import paths
 import sampler
 import dr2d #TODO remove
-from mesh1D import SuperVertex
-
-import pyrender #TODO remove
-import trimesh #TODO remove
-VIEWPORT_SIZE=(1280,720)
-ORTHO_CAM = [VIEWPORT_SIZE[0]/10, VIEWPORT_SIZE[1]/10]
+from meshkD import SuperVertex, Mesh2D
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 INPUT_PATH = paths.PATH_BOX
 sampler.NUMBER_OF_SAMPLES = 10
-dr2d.SIZE_THRESHOLD = 5.0
+dr2d.SIZE_THRESHOLD = 0.5
 
-def trimeshFromMesh(mesh): #TODO remove
-    vertices, triangles = mesh
-    vertices3D = [[sv.x, sv.y, sv.z] for sv in vertices]
-    triangles = [list(t) for t in mesh[1]]
-    mesh = trimesh.Trimesh(vertices=vertices3D, faces=triangles)
-    return mesh
-def renderMesh(mesh): #TODO remove
-    tm = trimeshFromMesh(mesh)
-    sceneMesh = pyrender.Mesh.from_trimesh(tm, smooth=False)
-    scene = pyrender.Scene()
-    scene.add(sceneMesh)
-    pyrender.Viewer(scene, VIEWPORT_SIZE, all_wireframe=True, cull_faces=False, use_perspective_cam=True)
+OUTPUT_DIR = os.path.join('tmp', 'mesher')
+# unitize timestamp prefix w/ sampler, so that output files have the same name
+OUTPUT_PREFIX = sampler.OUTPUT_PREFIX
 
-def triangulate(mesh1D):
+def triangulate_v1(mesh1D):
     def collect_vertex_indices_of_face(face_mesh):
         vertices = []
         outer_wire, inner_wires, _ = face_mesh
@@ -126,19 +114,40 @@ def triangulate_v2(mesh1D):
             super_vertices.append(sv)
         return super_vertices
     vertices = []
-    triangles = []
+    face_meshes = []
     for face_index in range(0, mesh1D.number_of_faces()):
+        _, _, face_type = mesh1D.face_meshes[face_index]
         print('face', face_index, 'of', mesh1D.number_of_faces(), '. . .')
         face_pslg = pslg_from_face_mesh(mesh1D, face_index)
         face_vertices, _, face_triangles = dr2d.chew93(face_pslg)
         face_vertices = make3D(face_vertices, face_index)
-        triangles += apply_offset(face_triangles, len(vertices))
+        face_triangles = apply_offset(face_triangles, len(vertices))
+        face_meshes.append((face_triangles, face_type))
         vertices += face_vertices
-    return vertices, triangles
+    return vertices, face_meshes
 
-if __name__ == '__main__':
+def mesher(path, write_mesh1D=True):
     simple_sampler = sampler.factory(sampler.SAMPLER_TYPE.SIMPLE)
     mesh1D = simple_sampler(INPUT_PATH)
-    sampler.write_mesh_to_file(mesh1D)
-    mesh2D = triangulate_v2(mesh1D)
-    renderMesh(mesh2D) #TODO remove
+    if write_mesh1D:
+        sampler.write_mesh_to_file(mesh1D)
+    print('>> mesh samples w/ chew93_2D')
+    vertices, face_meshes = triangulate_v2(mesh1D)
+    return Mesh2D(path, vertices, face_meshes)
+
+def write_mesh_to_file(mesh2D):
+    def generate_output_file_path():
+        name = OUTPUT_PREFIX + Mesh2D.FILE_EXTENSION
+        path = os.path.join(OUTPUT_DIR, name)
+        if os.path.exists(path):
+            raise Exception('output file name already exists:', path)
+        assert not os.path.exists(path)
+        return path
+    path = generate_output_file_path()
+    print('>> write to file \"', path, '\"', sep='')
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    pickle.dump(mesh2D, open(path, 'wb'))
+
+if __name__ == '__main__':
+    mesh2D = mesher(INPUT_PATH, write_mesh1D=True)
+    write_mesh_to_file(mesh2D)

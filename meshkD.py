@@ -1,15 +1,23 @@
-""" Mesh1D class
+""" MeshkD class
 This class represents the results of the sampling process.
 
 name: path to the sampled step file
 vertices: a complete list of all samples as SuperVertices
+bounding_box2D: for uv coordinates and -face_id as z
+bounding_box3D: for xyz coordinates
+
+''' Mesh1D class (MeshkD subclass)
 face_meshes: list of indexed face meshes
                         "=> tuple of...
                            ...a index loop of the outer boundary
                            ...a list of index loops for all inner boundaries
                            ...surface type string
-bounding_box2D: for uv coordinates and -face_id as z
-bounding_box3D: for xyz coordinates
+
+''' Mesh2D class (MeshkD subclass)
+face_meshes: list of indexed face meshes
+                        "=> tuple of...
+                            ...list of vertex indices 3-tuples
+                            ...surface type string
 """
 import numpy as np
 
@@ -19,8 +27,8 @@ BOUNDING_BOX_DEFAULT = (
     float('inf'), float('-inf')
 )
 
-FILE_EXTENSION = '.mesh1D'
 
+## SuperVertex + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 class SuperVertex:
     def __init__(self, x=0.0, y=0.0, z=0.0, u=0.0, v=0.0, face_id=0):
         self.x = x
@@ -49,7 +57,8 @@ class SuperVertex:
     def __repr__(self):
         return self.__str__()
 
-class Mesh1D:
+## MeshkD  + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
+class MeshkD:
     def __init__(self, name, vertices, face_meshes):
         self.name = name
         self.vertices = vertices
@@ -115,6 +124,18 @@ class Mesh1D:
         cog = np.array((x_max-x_min, y_max-y_min, z_max-z_min)) / 2
         return np.array((x_min, y_min, z_min)) + cog
 
+## Mesh1D  + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
+class Mesh1D(MeshkD):
+    FILE_EXTENSION = '.mesh1D'
+
     def get_face_type(self, index):
         _, _, face_type = self.face_meshes[index]
+        return face_type
+
+## Mesh2D  + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
+class Mesh2D(MeshkD):
+    FILE_EXTENSION = '.mesh2D'
+
+    def get_face_type(self, index):
+        _, face_type = self.face_meshes[index]
         return face_type

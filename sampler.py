@@ -37,7 +37,7 @@ from OCC.Extend.DataExchange import read_step_file, write_step_file
 from OCC.Extend.TopologyUtils import TopologyExplorer
 
 import paths
-from mesh1D import SuperVertex, Mesh1D, FILE_EXTENSION
+from meshkD import SuperVertex, Mesh1D
 
 SURFACE_TYPE_STRINGS = {
     GeomAbs_Plane :               'Plane',
@@ -67,8 +67,7 @@ class SAMPLER_TYPE: # enum for calling sampler factory
 OUTPUT_DIR = os.path.join('tmp', 'sampler')
 # to make written file names unique, a timestamp prefix is used
 TIMESTAMP = datetime.datetime.now()
-PREFIX_SHORT = TIMESTAMP.strftime('%y%m%d_%H%M%S')
-PREFIX_LONG = TIMESTAMP.strftime('%y%m%d_%H%M%S_%f')
+OUTPUT_PREFIX = TIMESTAMP.strftime('%y%m%d_%H%M%S')
 
 NUMBER_OF_SAMPLES = 20 # only for SIMPLE sampling method
 INCLUDE_OUTER_WIRES = True
@@ -247,7 +246,7 @@ def make_face_meshes_indexed(face_meshes):
 
 def factory(sampler_type):
     if sampler_type in SAMPLER_TYPE.string_dict:
-        print('>> create sampler of type', SAMPLER_TYPE.string_dict[sampler_type])
+        print('>> creating sampler of type', SAMPLER_TYPE.string_dict[sampler_type])
     else:
         raise Exception('factory() error - unknown sampler type')
     def sampler(path):
@@ -289,10 +288,10 @@ def noDoublyLoopInsertions(mesh1D):
 
 def write_mesh_to_file(mesh1D):
     def generate_output_file_path():
-        name = PREFIX_SHORT + FILE_EXTENSION
+        name = OUTPUT_PREFIX + Mesh1D.FILE_EXTENSION
         path = os.path.join(OUTPUT_DIR, name)
         if os.path.exists(path):
-            name = PREFIX_LONG + FILE_EXTENSION
+            raise Exception('output file name already exists:', path)
         assert not os.path.exists(path)
         return path
     path = generate_output_file_path()
