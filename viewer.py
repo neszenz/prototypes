@@ -8,7 +8,7 @@ import pyglet
 from pyglet.gl import *
 from pyglet.window import key, mouse
 
-from meshkD import SuperVertex, Mesh1D, Mesh2D
+from meshkD import SuperVertex, MeshkD
 
 ## config constants  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 INPUT_DIR = 'tmp'
@@ -16,13 +16,13 @@ DEFAULT_X = 1280
 DEFAULT_Y = 720
 ZOOM_DEFAULT = 100
 ZOOM_STEP = ZOOM_DEFAULT / 10
-SAVE_ZONE_FACTOR = 0.8 # scale weight for model size to window ratio
+SAVE_ZONE_FACTOR = 0.7 # scale weight for model size to window ratio
 ROTATION_STEP_SLOW = 1
 ROTATION_STEP_FAST = 5
 TILT_DEFAULT = 0
 
 ## global variables  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-mesheskD = [] # list of tuples (mesh1D, mesh2D)
+meshes = [] # list of tuples (mesh1D, mesh2D)
 window = pyglet.window.Window(DEFAULT_X, DEFAULT_Y,
                               fullscreen=False,
                               resizable=True,
@@ -32,14 +32,14 @@ window_caption = 'Delaunay Surface Mesh Refinement'
 flags = {
     'draw_bounding_box' : True,
     'draw_vertices' : True,
-    'draw_mesh' : True,
+    'draw_mesh1D' : True,
+    'draw_mesh2D' : True,
     'draw_2d_mode' : False,
     'arrow_mode' : False, # draw lines as arrows; only in individual face mode
     'mesh_drawn_since_last_face_index_change' : False # avoids skipping faces while flipping through
 }
 gvars = {
     'mesh_index' : 0,
-    'k_index' : 0,
     'face_index' : 0, # 0: all faces; >1: select individual face
     'dof' : np.array([0.0, 0.0, 1.0]), # direction of flight
     'zoom' : ZOOM_DEFAULT,
@@ -48,72 +48,24 @@ gvars = {
     'drag' : np.array([0.0, 0.0, 0.0])
 }
 
-def num_of_faces_from_index(mesh_index):
-    if len(mesheskD) == 0:
+def num_of_faces_from_current_mesh():
+    if len(meshes) == 0:
         return 0
-    meshkD = mesheskD[gvars['mesh_index']]
-    if meshkD[0] != None:
-        return meshkD[0].number_of_faces()
-    else:
-        return meshkD[1].number_of_faces()
+    return meshes[gvars['mesh_index']].number_of_faces()
 
-# mesh1D for k=2 and mesh2D for k=1
-def get_the_other_mesh():
-    if gvars['k_index'] == 0:
-        return mesheskD[gvars['mesh_index']][1]
-    else:
-        return mesheskD[gvars['mesh_index']][0]
+def load_meshes_from_files():
+    global meshes
+    meshes.clear()
 
-def load_mesheskD_from_files():
-    def combine_file_lists(files1D, files2D):
-        def extract_file_name(file_path):
-            assert len(Mesh1D.FILE_EXTENSION) == len(Mesh2D.FILE_EXTENSION)
-            assert len(file_path) > len(Mesh1D.FILE_EXTENSION)
-            _, file_path_tail = os.path.split(file_path)
-            return file_path_tail[:-len(Mesh1D.FILE_EXTENSION)]
-        file_pairs = []
-        while len(files1D) > 0:
-            file1D = files1D[-1]
-            file1D_name = extract_file_name(file1D)
-            if len(files2D) > 0:
-                file2D = files2D[-1]
-                file2D_name = extract_file_name(file2D)
-                if file1D_name == file2D_name:
-                    new_pair = (file1D, file2D)
-                    files1D.pop()
-                    files2D.pop()
-                elif file1D_name > file2D_name:
-                    new_pair = (file1D, None)
-                    files1D.pop()
-                else:
-                    new_pair = (None, file2D)
-                    files2D.pop()
-            else:
-                new_pair = (file1D, None)
-                files1D.pop()
-            file_pairs.append(new_pair)
-        while len(files2D) > 0:
-            file2D = files2D[-1]
-            new_pair = (None, file2D)
-            files2D.pop()
-            file_pairs.append(new_pair)
-        return file_pairs
-    def load_mesh_from_file(path):
-        meshkD = pickle.load(open(path, 'rb'))
-        meshkD.name = path
-        return meshkD
-    global mesheskD
-    mesheskD.clear()
-    files1D = sorted(glob.glob(os.path.join(INPUT_DIR, '**/*'+Mesh1D.FILE_EXTENSION)))
-    files2D = sorted(glob.glob(os.path.join(INPUT_DIR, '**/*'+Mesh2D.FILE_EXTENSION)))
-    file_pairs = combine_file_lists(files1D, files2D)
-    for file_pair in file_pairs:
-        mesh1D_file, mesh2D_file = file_pair
-        mesh1D = load_mesh_from_file(mesh1D_file) if mesh1D_file != None else None
-        mesh2D = load_mesh_from_file(mesh2D_file) if mesh2D_file != None else None
-        assert mesh1D != None or mesh2D != None
-        mesheskD.append((mesh1D, mesh2D))
-    gvars['face_index'] = min(gvars['face_index'], num_of_faces_from_index(gvars['mesh_index']))
+    files = sorted(glob.glob(os.path.join(INPUT_DIR, '*'+MeshkD.FILE_EXTENSION)), reverse=True)
+
+    for path in files:
+        mesh = pickle.load(open(path, 'rb'))
+        mesh.name = path + ' from ' + mesh.name
+
+        meshes.append(mesh)
+
+    gvars['face_index'] = min(gvars['face_index'], num_of_faces_from_current_mesh())
 
 def set_projection(width):
     w = width
@@ -149,9 +101,9 @@ def apply_to_zoom(value):
 @window.event
 def on_text_motion(motion):
     def apply_to_face_index(value):
-        global flags, gvars, mesheskD
+        global flags, gvars
         if flags['mesh_drawn_since_last_face_index_change']:
-            number_of_faces = num_of_faces_from_index(gvars['mesh_index'])
+            number_of_faces = num_of_faces_from_current_mesh()
             if gvars['face_index'] + value >= 0 and gvars['face_index'] + value <= number_of_faces:
                 gvars['face_index'] += value
                 flags['mesh_drawn_since_last_face_index_change'] = False
@@ -184,10 +136,10 @@ def on_key_press(symbol, modifiers):
             gvars['rotation'] = np.array([0.0, 0.0, 0.0])
             gvars['tilt'] = TILT_DEFAULT
     def apply_to_mesh_index(value):
-        global gvars, mesheskD
-        if gvars['mesh_index'] + value >= 0 and gvars['mesh_index']+ value < len(mesheskD):
+        global gvars, meshes
+        if gvars['mesh_index']+value >= 0 and gvars['mesh_index']+value < len(meshes):
             gvars['mesh_index']+= value
-        gvars['face_index'] = min(gvars['face_index'], num_of_faces_from_index(gvars['mesh_index']))
+        gvars['face_index'] = min(gvars['face_index'], num_of_faces_from_current_mesh())
     global flags, gvars
     if modifiers == 0:
         if symbol == key.C:
@@ -201,15 +153,15 @@ def on_key_press(symbol, modifiers):
         if symbol == key.J:
             apply_to_mesh_index(-1)
         if symbol == key.U:
-            load_mesheskD_from_files()
+            load_meshes_from_files()
         if symbol == key.V:
             flags['draw_vertices'] = not flags['draw_vertices']
         if symbol == key.B:
             flags['draw_bounding_box'] = not flags['draw_bounding_box']
         if symbol == key.N:
-            flags['draw_mesh'] = not flags['draw_mesh']
+            flags['draw_mesh1D'] = not flags['draw_mesh1D']
         if symbol == key.M:
-            gvars['k_index'] = (gvars['k_index'] + 1) % 2
+            flags['draw_mesh2D'] = not flags['draw_mesh2D']
         if symbol == key.T:
             gvars['tilt'] = 10 if gvars['tilt'] == 0 else 0
         if symbol == key.X:
@@ -286,7 +238,7 @@ def on_draw():
         else:
             bounding_box = mesh.bounding_box3D
         x_min, x_max, y_min, y_max, z_min, z_max = bounding_box
-        glColor3f(0.5, 0.5, 0.5)
+        glColor3f(0.5, 0.5, 0.0)
         glBegin(GL_LINE_LOOP)
         glVertex3f(x_min, y_min, z_min)
         glVertex3f(x_max, y_min, z_min)
@@ -310,8 +262,8 @@ def on_draw():
         glVertex3f(x_min, y_max, z_max)
         glEnd()
     def draw_mesh(mesh):
-        def draw1D(vertices, face_mesh):
-            def draw_wire_mesh(vertices, wire_mesh):
+        def draw_face1D(face_mesh):
+            def draw_wire(vertices, wire_mesh):
                 def draw_line(sv0, sv1):
                     global flags
                     if flags['draw_2d_mode']:
@@ -337,61 +289,83 @@ def on_draw():
                         glVertex3f(vb[0], vb[1], vb[2])
                         glVertex3f(v1[0], v1[1], v1[2])
                 glBegin(GL_LINES)
-                for iVertex in range(0, len(wire_mesh)):
-                    sv0 = vertices[wire_mesh[iVertex]]
-                    sv1 = vertices[wire_mesh[(iVertex+1)%len(wire_mesh)]]
+                for vertex_index in range(len(wire_mesh)):
+                    sv0 = vertices[wire_mesh[vertex_index]]
+                    sv1 = vertices[wire_mesh[(vertex_index+1)%len(wire_mesh)]]
                     draw_line(sv0, sv1)
                 glEnd()
-            outer_wire_mesh, inner_wire_meshes, _ = face_mesh
-            draw_wire_mesh(vertices, outer_wire_mesh)
-            for inner_wire_mesh in inner_wire_meshes:
-                draw_wire_mesh(vertices, inner_wire_mesh)
-        def draw2D(vertices, face_mesh):
-            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
-            triangles, _ = face_mesh
-            glBegin(GL_TRIANGLES)
-            for triangle in triangles:
-                i0, i1, i2 = triangle
+            vertices, wire_meshes, _, _ = face_mesh
+            for wire_mesh in wire_meshes:
+                draw_wire(vertices, wire_mesh)
+        def draw_face2D(face_mesh):
+            def draw_triangle(sv0, sv1, sv2):
                 if flags['draw_2d_mode']:
-                    v0 = vertices[i0].UV_vec3()
-                    v1 = vertices[i1].UV_vec3()
-                    v2 = vertices[i2].UV_vec3()
+                    v0 = sv0.UV_vec3()
+                    v1 = sv1.UV_vec3()
+                    v2 = sv2.UV_vec3()
                 else:
-                    v0 = vertices[i0].XYZ_vec3()
-                    v1 = vertices[i1].XYZ_vec3()
-                    v2 = vertices[i2].XYZ_vec3()
+                    v0 = sv0.XYZ_vec3()
+                    v1 = sv1.XYZ_vec3()
+                    v2 = sv2.XYZ_vec3()
+
                 glVertex3f(v0[0], v0[1], v0[2])
                 glVertex3f(v1[0], v1[1], v1[2])
                 glVertex3f(v2[0], v2[1], v2[2])
+
+                return
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+            vertices, _, triangles, _ = face_mesh
+
+            glBegin(GL_TRIANGLES)
+
+            for triangle in triangles:
+                i0, i1, i2 = triangle
+                draw_triangle(vertices[i0], vertices[i1], vertices[i2])
+
             glEnd()
-        vertices = mesh.vertices
-        glColor3f(1.0, 1.0, 1.0)
-        for iFace in range(0, mesh.number_of_faces()):
-            if gvars['face_index'] > 0 and gvars['face_index']-1 != iFace:
+            return
+        for face_index in range(mesh.number_of_faces()):
+            if gvars['face_index'] > 0 and gvars['face_index']-1 != face_index:
                 continue
-            face_mesh = mesh.face_meshes[iFace]
-            if gvars['k_index'] == 0:
-                draw1D(vertices, face_mesh)
-            else:
-                draw2D(vertices, face_mesh)
+            face_mesh = mesh.face_meshes[face_index]
+            if flags['draw_mesh2D']:
+                glColor3f(0.6, 0.6, 0.6)
+                draw_face2D(face_mesh)
+            if flags['draw_mesh1D']:
+                glColor3f(1.0, 1.0, 1.0)
+                draw_face1D(face_mesh)
     def draw_vertices(mesh):
-        current_face_collection = []
-        glColor3f(1.0, 0.0, 0.0)
-        glBegin(GL_POINTS)
-        for sv in mesh.vertices:
+        def draw_super_vertex(sv):
             if flags['draw_2d_mode']:
                 x, y, z = sv.UV_vec3()
             else:
                 x, y, z = sv.XYZ_vec3()
-            if gvars['face_index'] == sv.face_id:
-                current_face_collection.append((x, y, z))
             glVertex3f(x, y, z)
-        if not flags['draw_mesh']:
-            glColor3f(1.0, 1.0, 0.0)
-            for v in current_face_collection:
-                x, y, z = v
-                glVertex3f(x, y, z)
+
+            return
+        current_face_collection = []
+
+        glBegin(GL_POINTS)
+
+        for face_mesh in mesh.face_meshes:
+            vertices, _, _, _ = face_mesh
+
+            if gvars['face_index'] == 0:
+                glColor3f(1.0, 1.0, 1.0)
+            else:
+                glColor3f(1.0, 0.0, 0.0)
+
+            for sv in vertices:
+                if gvars['face_index'] == sv.face_id:
+                    current_face_collection.append(sv)
+                draw_super_vertex(sv)
+
+        glColor3f(1.0, 1.0, 1.0)
+        for sv in current_face_collection:
+            draw_super_vertex(sv)
+
         glEnd()
+        return
     def draw_label_interface(mesh):
         def draw_label(label_id, text):
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
@@ -411,41 +385,33 @@ def on_draw():
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
         set_projection(window.width)
-        if mesh == None:
-            mesh = get_the_other_mesh()
-            mesh_type = 'mesh1D' if gvars['k_index'] == 0 else 'mesh2D'
-            draw_label(0, 'mesh '+str(-1*gvars['mesh_index'])+' (no '+mesh_type+')')
+        draw_label(0, 'mesh '+str(-1*gvars['mesh_index'])+' ('+mesh.name+')')
+        if gvars['face_index'] == 0:
+            draw_label(1, 'draw all faces')
         else:
-            draw_label(0, 'mesh '+str(-1*gvars['mesh_index'])+' ('+mesh.name+')')
-            if gvars['face_index'] == 0:
-                draw_label(1, 'draw all faces')
-            else:
-                face_id_from_total = str(gvars['face_index']) + '/' + str(len(mesh.face_meshes))
-                face_type = mesh.get_face_type(gvars['face_index']-1)
-                draw_label(1, 'draw face '+face_id_from_total+' ('+face_type+')')
+            face_id_from_total = str(gvars['face_index']) + '/' + str(len(mesh.face_meshes))
+            face_type = mesh.get_face_type(gvars['face_index']-1)
+            draw_label(1, 'draw face '+face_id_from_total+' ('+face_type+')')
     global flags, gvars
     window.set_caption(window_caption)
     glClear(GL_COLOR_BUFFER_BIT)
-    if len(mesheskD) == 0:
+    if len(meshes) == 0:
         draw_no_meshes_msg()
         return
-    mesh = mesheskD[gvars['mesh_index']][gvars['k_index']]
-    if mesh == None:
-        draw_label_interface(None)
-        return
+    mesh = meshes[gvars['mesh_index']]
     set_projection(gvars['zoom'])
     set_modelview(mesh)
     if flags['draw_bounding_box']:
         draw_bb(mesh)
-    if flags['draw_mesh'] and gvars['face_index'] == 0:
+    if gvars['face_index'] == 0:
         draw_mesh(mesh)
     if flags['draw_vertices']:
         draw_vertices(mesh)
-    if flags['draw_mesh'] and gvars['face_index'] != 0:
+    if gvars['face_index'] != 0:
         draw_mesh(mesh)
     draw_label_interface(mesh)
     flags['mesh_drawn_since_last_face_index_change'] = True
 
 if __name__ == '__main__':
-    load_mesheskD_from_files()
+    load_meshes_from_files()
     pyglet.app.run()
