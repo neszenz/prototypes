@@ -35,6 +35,7 @@ flags = {
     'draw_mesh1D' : True,
     'draw_mesh2D' : True,
     'draw_2d_mode' : False,
+    'draw_origin' : False,
     'arrow_mode' : False, # draw lines as arrows; only in individual face mode
     'mesh_drawn_since_last_face_index_change' : False # avoids skipping faces while flipping through
 }
@@ -142,18 +143,22 @@ def on_key_press(symbol, modifiers):
         gvars['face_index'] = min(gvars['face_index'], num_of_faces_from_current_mesh())
     global flags, gvars
     if modifiers == 0:
-        if symbol == key.C:
-            reset()
+        if symbol == key.T:
+            gvars['tilt'] = 10 if gvars['tilt'] == 0 else 0
+        if symbol == key.U:
+            load_meshes_from_files()
+        if symbol == key.O:
+            flags['draw_origin'] = not flags['draw_origin']
         if symbol == key.A:
             flags['arrow_mode'] = not flags['arrow_mode']
         if symbol == key.F:
             flags['draw_2d_mode'] = not flags['draw_2d_mode']
-        if symbol == key.K:
-            apply_to_mesh_index(1)
         if symbol == key.J:
             apply_to_mesh_index(-1)
-        if symbol == key.U:
-            load_meshes_from_files()
+        if symbol == key.K:
+            apply_to_mesh_index(1)
+        if symbol == key.C:
+            reset()
         if symbol == key.V:
             flags['draw_vertices'] = not flags['draw_vertices']
         if symbol == key.B:
@@ -162,10 +167,6 @@ def on_key_press(symbol, modifiers):
             flags['draw_mesh1D'] = not flags['draw_mesh1D']
         if symbol == key.M:
             flags['draw_mesh2D'] = not flags['draw_mesh2D']
-        if symbol == key.T:
-            gvars['tilt'] = 10 if gvars['tilt'] == 0 else 0
-        if symbol == key.X:
-            pass
     #return pyglet.event.EVENT_HANDLED # disables ESC termination handler
 
 @window.event
@@ -366,6 +367,18 @@ def on_draw():
 
         glEnd()
         return
+    def draw_origin():
+        glBegin(GL_LINES)
+        glColor3f(1.0, 0.0, 0.0)
+        glVertex3f(0.0, 0.0, 0.0)
+        glVertex3f(1.0, 0.0, 0.0)
+        glColor3f(0.0, 1.0, 0.0)
+        glVertex3f(0.0, 0.0, 0.0)
+        glVertex3f(0.0, 1.0, 0.0)
+        glColor3f(0.0, 0.0, 1.0)
+        glVertex3f(0.0, 0.0, 0.0)
+        glVertex3f(0.0, 0.0, 1.0)
+        glEnd()
     def draw_label_interface(mesh):
         def draw_label(label_id, text):
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
@@ -409,6 +422,8 @@ def on_draw():
         draw_vertices(mesh)
     if gvars['face_index'] != 0:
         draw_mesh(mesh)
+    if flags['draw_origin']:
+        draw_origin()
     draw_label_interface(mesh)
     flags['mesh_drawn_since_last_face_index_change'] = True
 
