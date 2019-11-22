@@ -109,13 +109,14 @@ def generate_mesh_framework(compound, shape_maps):
     print('model compound contains', ex.number_of_faces(), 'faces', end='')
     print(',', ex.number_of_wires(), 'wires', end='')
     print(',', ex.number_of_edges(), 'edges')
-    # cnt = 1 #TODO remove
+    cnt = 1 #TODO remove
     for face in ex.faces():
-        # if cnt > 26: #TODO remove
-            # return model_framework #TODO remove
+        if cnt != 4: #TODO remove
+            cnt += 1 #TODO remove
+            # continue #TODO remove
         face_framework = generate_face_framework(face, shape_maps)
         model_framework.append(face_framework)
-        # cnt += 1 #TODO remove
+        cnt += 1 #TODO remove
     return model_framework
 
 def edge_sampler_simple(edge_info, face, shape_maps):

@@ -36,10 +36,18 @@ def calculate_angle(p0, p1, p2):
     p10 = normalize(p0 - p1)
     p12 = normalize(p2 - p1)
 
-    dp = np.dot(p10, p12)
-    max(-1.0, min(1.0, dp))
+    dp = max(-1.0, min(1.0, np.dot(p10, p12)))
 
     return np.arccos(dp)
+
+def calculate_normal(p0, p1, p2):
+    p10 = p0 - p1
+    p12 = p2 - p1
+
+    return np.cross(p12, p10)
+
+def calculate_area(p0, p1, p2):
+    return np.linalg.norm(calculate_normal(p0, p1, p2)) / 2.0
 
 ## BEGINE OF CHEW93_SURFACE  = + = + = + = + = + = + = + = + = + = + = + = + = +
 # 1st: builds CDT meeting normal criteria; 2nd: filps edges until surface CDT
@@ -89,46 +97,74 @@ def triangulate(vertices, pslg):
 
             return True
         def flip_one_non_scdt_edge(omesh):
-            def get_min_angle(omesh, eh):
-                def get_min_face_angle(omesh, heh):
-                    p0 = omesh.point(omesh.from_vertex_handle(heh))
-                    heh = omesh.next_halfedge_handle(heh)
-                    p1 = omesh.point(omesh.from_vertex_handle(heh))
-                    heh = omesh.next_halfedge_handle(heh)
-                    p2 = omesh.point(omesh.from_vertex_handle(heh))
+            def flip_improves_mesh(omesh, eh):
+                def get_min_face_angle(triangle):
+                    p0, p1, p2 = triangle
 
                     alpha = calculate_angle(p0, p1, p2)
                     beta = calculate_angle(p1, p2, p0)
                     gamma = calculate_angle(p2, p0, p1)
-
                     assert np.allclose((alpha+beta+gamma), np.pi)
+
+                    min_angle = min(alpha, beta, gamma)
+                    assert min_angle >= 0.0
 
                     return min(alpha, beta, gamma)
                 heh0 = omesh.halfedge_handle(eh, 0)
                 heh1 = omesh.halfedge_handle(eh, 1)
 
-                min_angle0 = get_min_face_angle(omesh, heh0)
-                min_angle1 = get_min_face_angle(omesh, heh0)
+                # collect quadrilateral vertex points of adjacent triangles
+                heh_tmp = heh0
+                vh0 = omesh.from_vertex_handle(heh_tmp)
+                heh_tmp = omesh.next_halfedge_handle(heh_tmp)
+                vh1 = omesh.from_vertex_handle(heh_tmp)
+                heh_tmp = omesh.next_halfedge_handle(heh_tmp)
+                vh2 = omesh.from_vertex_handle(heh_tmp)
+                assert omesh.to_vertex_handle(heh_tmp) == vh0
+                heh_tmp = heh1
+                assert omesh.to_vertex_handle(heh_tmp) == vh0
+                assert omesh.from_vertex_handle(heh_tmp) == vh1
+                heh_tmp = omesh.next_halfedge_handle(heh_tmp)
+                vh3 = omesh.to_vertex_handle(heh_tmp)
 
-                return min(min_angle0, min_angle1)
+                p0 = omesh.point(vh0)
+                p1 = omesh.point(vh1)
+                p2 = omesh.point(vh2)
+                p3 = omesh.point(vh3)
+
+                # situation before flip
+                t0 = (p0, p1, p2)
+                t1 = (p0, p3, p1)
+                min_angle_before = min(get_min_face_angle(t0), get_min_face_angle(t1))
+                t0_normal_before = calculate_normal(t0[0], t0[1], t0[2])
+                t1_normal_before = calculate_normal(t1[0], t1[1], t1[2])
+
+                # situation after flip
+                t0 = (p3, p2, p0)
+                t1 = (p3, p1, p2)
+                min_angle_after = min(get_min_face_angle(t0), get_min_face_angle(t1))
+                t0_normal_after = calculate_normal(t0[0], t0[1], t0[2])
+                t1_normal_after = calculate_normal(t1[0], t1[1], t1[2])
+
+                # make sure, the triangles were not flipped
+                if np.allclose(normalize(t0_normal_before), normalize(t0_normal_after)) or \
+                   np.allclose(normalize(t1_normal_before), normalize(t1_normal_after)):
+                    return False
+
+                return min_angle_after > min_angle_before
             for eh in omesh.edges():
                 if omesh.is_boundary(eh):
                     continue
+
                 # assert omesh.is_flip_ok(eh)
-                if not omesh.is_flip_ok(eh): #TODO remove
+                if not omesh.is_flip_ok(eh): #TODO should work with assert
                     continue
 
-                min_angle_before = get_min_angle(omesh, eh)
-                omesh.flip(eh)
-                min_angle_after = get_min_angle(omesh, eh)
-
-                print(min_angle_before, min_angle_after)
-                if min_angle_after <= min_angle_before:
-                    print('nope')
-                    omesh.flip(eh) # redo if no improvment
-                else:
-                    print('flip')
+                if flip_improves_mesh(omesh, eh):
+                    omesh.flip(eh)
                     return True
+                else:
+                    continue
 
             return False
         def triangles_from_omesh(omesh):
@@ -147,10 +183,10 @@ def triangulate(vertices, pslg):
         omesh = openmesh_from_cdt(vertices, cdt_triangles)
         assert are_consistent(omesh, vertices)
 
-        # while flip_one_non_scdt_edge(omesh):
-            # continue
-        for i in range(100):
-            flip_one_non_scdt_edge(omesh)
+        while flip_one_non_scdt_edge(omesh):
+            continue
+        # for i in range(1):
+            # flip_one_non_scdt_edge(omesh)
 
         scdt_triangles = triangles_from_omesh(omesh)
 
@@ -293,4 +329,4 @@ def write_mesh_to_file(mesh2D):
 
 if __name__ == '__main__':
     mesh = mesher(INPUT_PATH)
-    # write_mesh_to_file(mesh)
+    write_mesh_to_file(mesh)
