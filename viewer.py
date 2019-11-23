@@ -1,6 +1,6 @@
 import os
-import glob
 import numpy as np
+import pathlib
 import pickle
 import sys
 
@@ -11,7 +11,6 @@ from pyglet.window import key, mouse
 from meshkD import SuperVertex, MeshkD
 
 ## config constants  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-# INPUT_DIR = '../results/mesher/SCDT'
 INPUT_DIR = 'tmp'
 DEFAULT_X = 1280
 DEFAULT_Y = 720
@@ -59,11 +58,11 @@ def load_meshes_from_files():
     global meshes
     meshes.clear()
 
-    files = sorted(glob.glob(os.path.join(INPUT_DIR, '*'+MeshkD.FILE_EXTENSION)), reverse=True)
+    filepaths = pathlib.Path(INPUT_DIR).rglob('*'+MeshkD.FILE_EXTENSION)
 
-    for path in files:
-        mesh = pickle.load(open(path, 'rb'))
-        mesh.name = path + ' from ' + mesh.name
+    for filepath in sorted(filepaths, reverse=True):
+        mesh = pickle.load(open(filepath, 'rb'))
+        mesh.name = str(filepath) + ' from ' + mesh.name
 
         meshes.append(mesh)
 
