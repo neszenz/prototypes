@@ -57,17 +57,6 @@ def generate_shape_maps(compound):
     topexp.MapShapes(compound, TopAbs_EDGE, edge_map)
     return (face_map, wire_map, edge_map)
 
-def project_to_XYZ(sv, path): #TODO super not final; temp!!1!
-    # compound = read_step_file(path, verbosity=False)
-    # face_map, _, _ = generate_shape_maps(compound)
-    # face = face_map.FindKey(sv.face_id)
-    # surface = BRepAdaptor_Surface(face)
-    # xyz = surface.Value(sv.u, sv.v)
-    # sv.x = xyz.X()
-    # sv.y = xyz.Y()
-    # sv.z = xyz.Z()
-    print('reimplement project_to_XYZ()')
-
 # same structure as model mesh, but wires consist of a list of edge_info tuples
 # for later replacement during actual sampling:
 # edge_info = (wire, edge)
@@ -109,14 +98,14 @@ def generate_mesh_framework(compound, shape_maps):
     print('model compound contains', ex.number_of_faces(), 'faces', end='')
     print(',', ex.number_of_wires(), 'wires', end='')
     print(',', ex.number_of_edges(), 'edges')
-    cnt = 1 #TODO remove
+    cnt = 1 #TODO used for testing
     for face in ex.faces():
-        if cnt != 6: #TODO remove
-            cnt += 1 #TODO remove
-            # continue #TODO remove
+        if cnt != 6: #TODO used for testing
+            cnt += 1 #TODO used for testing
+            # continue #TODO used for testing
         face_framework = generate_face_framework(face, shape_maps)
         model_framework.append(face_framework)
-        cnt += 1 #TODO remove
+        cnt += 1 #TODO used for testing
     return model_framework
 
 def edge_sampler_simple(edge_info, face, shape_maps):
@@ -137,6 +126,7 @@ def edge_sampler_simple(edge_info, face, shape_maps):
         p3d = surface.Value(p2d.X(), p2d.Y())
         sv = SuperVertex(x=p3d.X(), y=p3d.Y(), z=p3d.Z(), u=p2d.X(), v=p2d.Y())
         sv.face_id = face_map.FindIndex(face)
+        sv.face = face
         sv.edge = edge
         edge_mesh.append(sv)
     # here, the edges orientation are made consistent with that of the wire

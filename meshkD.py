@@ -15,8 +15,11 @@ bounding_box3D: for xyz coordinates
 """
 import numpy as np
 
+from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCC.Core.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BezierSurface, GeomAbs_BSplineSurface, GeomAbs_SurfaceOfRevolution, GeomAbs_SurfaceOfExtrusion, GeomAbs_OffsetSurface, GeomAbs_OtherSurface
+from OCC.Core.gp import gp_Pnt
+from OCC.Core.ShapeAnalysis import ShapeAnalysis_Surface
 
 BOUNDING_BOX_DEFAULT = (
     float('inf'), float('-inf'),
@@ -47,6 +50,7 @@ class SuperVertex:
         self.u = u
         self.v = v
         self.face_id = 0
+        self.face = None
         self.edge = None
 
     def UV_vec2(self):
@@ -55,6 +59,22 @@ class SuperVertex:
         return np.array([self.u, self.v, -self.face_id])
     def XYZ_vec3(self):
         return np.array([self.x, self.y, self.z])
+
+    def project_to_UV(self):
+        assert self.face != None
+        surface = BRep_Tool.Surface(self.face)
+        analysis_surface = ShapeAnalysis_Surface(surface)
+        xyz = gp_Pnt(self.x, self.y, self.z)
+        uv = analysis_surface.ValueOfUV(xyz, 0.0001)
+        self.u = uv.X()
+        self.v = uv.Y()
+    def project_to_XYZ(self):
+        assert self.face != None
+        surface = BRepAdaptor_Surface(self.face)
+        xyz = surface.Value(sv.u, sv.v)
+        sv.x = xyz.X()
+        sv.y = xyz.Y()
+        sv.z = xyz.Z()
 
     def allclose_UV(self, other):
         return np.allclose(self.UV_vec2(), other.UV_vec2())

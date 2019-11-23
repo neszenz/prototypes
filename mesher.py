@@ -20,6 +20,8 @@ from meshkD import SuperVertex, MeshkD
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 INPUT_PATH = paths.PATH_TEST1
 sampler.NUMBER_OF_SAMPLES = 10
+SMALLEST_ANGLE = np.deg2rad(30)
+SIZE_THRESHOLD = 5.0
 
 OUTPUT_DIR = 'tmp'
 # unitize timestamp prefix w/ sampler, so that output files have the same name
@@ -195,11 +197,45 @@ def triangulate(vertices, pslg):
     return triangles
 
 def find_largest_failing_triangle(scdt):
-    delta = -1
+    def shape_test(scdt, t_index):
+        vertices, _, triangles = scdt
+        i0, i1, i2 = triangles[t_index]
+        p0 = vertices[i0].XYZ_vec3()
+        p1 = vertices[i1].XYZ_vec3()
+        p2 = vertices[i2].XYZ_vec3()
 
-    #TODO
+        alpha = calculate_angle(p0, p1, p2)
+        beta = calculate_angle(p1, p2, p0)
+        gamma = calculate_angle(p2, p0, p1)
 
-    return delta
+        return min(alpha, beta, gamma) > SMALLEST_ANGLE
+    def size_test(scdt, t_index):
+        vertices, _, triangles = scdt
+        i0, i1, i2 = triangles[t_index]
+        p0 = vertices[i0].XYZ_vec3()
+        p1 = vertices[i1].XYZ_vec3()
+        p2 = vertices[i2].XYZ_vec3()
+
+        t_size = calculate_area(p0, p1, p2)
+
+        return t_size <= SIZE_THRESHOLD, t_size
+    _, _, triangles = scdt
+
+    delta_index = -1
+    delta_size = 0.0
+
+    for t_index in range(len(triangles)):
+        well_shaped = shape_test(scdt, t_index)
+        well_sized, t_size = size_test(scdt, t_index)
+
+        if well_shaped and well_sized:
+            continue
+        else:
+            if t_size > delta_size:
+                delta_size = t_size
+                delta_index = t_index
+
+    return delta_index
 
 # computes surface circumcenter in ambient space
 def surface_circumcenter(scdt, delta):
@@ -219,9 +255,15 @@ def split_segment(scdt, segment_index):
     return
 
 def insert_circumcenter(scdt, c):
-    svc = SuperVertex(x=c[0], y=c[1], z=c[2])
+    vertices, _, _ = scdt
+    assert len(vertices) > 0
 
-    #TODO
+    svc = SuperVertex(x=c[0], y=c[1], z=c[2])
+    svc.face_id = vertices[0].face_id
+    svc.face = vertices[0].face
+    svc.project_to_UV()
+
+    vertices.append(svc)
 
     return
 
@@ -262,12 +304,12 @@ def chew93_Surface(vertices, wire_meshes):
     scdt = vertices, pslg, triangles
 
     # step 2+3: find largest triangle that fails shape ans size criteria
-    #delta = find_largest_failing_triangle(scdt)
+    delta_index = find_largest_failing_triangle(scdt)
 
-    #while delta >= 0:
+    #while delta_index >= 0:
         # step 4: travel across the from any of delta's corners to c
-        #c = surface_circumcenter(scdt, delta)
-        #hit_segment_index = travel(scdt, delta, c)
+        #c = surface_circumcenter(scdt, delta_index)
+        #hit_segment_index = travel(scdt, delta_index, c)
 
         #if hit_segment_index >= 0:
             # step 6: split segment; remove encroaching inner vertices
@@ -278,7 +320,7 @@ def chew93_Surface(vertices, wire_meshes):
 
         # update for next loop
         #scdt = vertices, pslg, triangulate_scdt(vertices, pslg)
-        #delta = find_largest_failing_triangle(scdt)
+        #delta_index = find_largest_failing_triangle(scdt)
 
     return triangles
 ## END OF CHEW93_SURFACE = + = + = + = + = + = + = + = + = + = + = + = + = + = +
