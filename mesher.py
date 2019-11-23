@@ -18,7 +18,7 @@ import sampler
 from meshkD import SuperVertex, MeshkD
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-INPUT_PATH = paths.PATH_BOX
+INPUT_PATH = paths.PATH_TEST1
 sampler.NUMBER_OF_SAMPLES = 10
 
 OUTPUT_DIR = 'tmp'
@@ -156,11 +156,8 @@ def triangulate(vertices, pslg):
                 if omesh.is_boundary(eh):
                     continue
 
-                # assert omesh.is_flip_ok(eh)
-                if not omesh.is_flip_ok(eh): #TODO should work with assert
-                    continue
-
                 if flip_improves_mesh(omesh, eh):
+                    assert omesh.is_flip_ok(eh)
                     omesh.flip(eh)
                     return True
                 else:
@@ -185,8 +182,6 @@ def triangulate(vertices, pslg):
 
         while flip_one_non_scdt_edge(omesh):
             continue
-        # for i in range(1):
-            # flip_one_non_scdt_edge(omesh)
 
         scdt_triangles = triangles_from_omesh(omesh)
 

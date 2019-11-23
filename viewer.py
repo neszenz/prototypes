@@ -11,6 +11,7 @@ from pyglet.window import key, mouse
 from meshkD import SuperVertex, MeshkD
 
 ## config constants  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
+# INPUT_DIR = '../results/mesher/SCDT'
 INPUT_DIR = 'tmp'
 DEFAULT_X = 1280
 DEFAULT_Y = 720
@@ -167,7 +168,7 @@ def on_key_press(symbol, modifiers):
             flags['draw_mesh1D'] = not flags['draw_mesh1D']
         if symbol == key.M:
             flags['draw_mesh2D'] = not flags['draw_mesh2D']
-    #return pyglet.event.EVENT_HANDLED # disables ESC termination handler
+    return pyglet.event.EVENT_HANDLED # disables ESC termination handler
 
 @window.event
 def on_mouse_drag(x, y, dx, dy, button, modifiers):

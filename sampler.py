@@ -111,7 +111,7 @@ def generate_mesh_framework(compound, shape_maps):
     print(',', ex.number_of_edges(), 'edges')
     cnt = 1 #TODO remove
     for face in ex.faces():
-        if cnt != 4: #TODO remove
+        if cnt != 6: #TODO remove
             cnt += 1 #TODO remove
             # continue #TODO remove
         face_framework = generate_face_framework(face, shape_maps)
