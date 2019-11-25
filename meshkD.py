@@ -71,10 +71,10 @@ class SuperVertex:
     def project_to_XYZ(self):
         assert self.face != None
         surface = BRepAdaptor_Surface(self.face)
-        xyz = surface.Value(sv.u, sv.v)
-        sv.x = xyz.X()
-        sv.y = xyz.Y()
-        sv.z = xyz.Z()
+        xyz = surface.Value(self.u, self.v)
+        self.x = xyz.X()
+        self.y = xyz.Y()
+        self.z = xyz.Z()
 
     def allclose_UV(self, other):
         return np.allclose(self.UV_vec2(), other.UV_vec2())

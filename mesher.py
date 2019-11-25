@@ -17,6 +17,9 @@ import paths
 import sampler
 from meshkD import SuperVertex, MeshkD
 
+from OCC.Core.gp import gp_Pnt, gp_Dir, gp_Lin
+from OCC.Core.IntCurvesFace import IntCurvesFace_Intersector
+
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 INPUT_PATH = paths.PATH_TEST1
 sampler.NUMBER_OF_SAMPLES = 10
@@ -237,14 +240,62 @@ def find_largest_failing_triangle(scdt):
 
     return delta_index
 
-# computes surface circumcenter in ambient space
-def surface_circumcenter(scdt, delta):
-    #TODO
+def calculate_circumcenter(scdt, delta_index):
+    vertices, _, triangles = scdt
+    i0, i1, i2 = triangles[delta_index]
+    A = vertices[i0].XYZ_vec3()
+    B = vertices[i1].XYZ_vec3()
+    C = vertices[i2].XYZ_vec3()
 
-    return np.array((0.0, 0.0, 0.0)) #TODO  stub
+    # by 'Oscar Lanzi III' from
+    # https://sci.math.narkive.com/nJMeroLe/circumcenter-of-a-3d-triangle
+    a = np.linalg.norm(B-C)
+    b = np.linalg.norm(A-C)
+    c = np.linalg.norm(A-B)
+    a_square = a**2
+    b_square = b**2
+    c_square = c**2
+    A_comp = A*(a_square*(b_square+c_square-a_square))
+    B_comp = B*(b_square*(a_square+c_square-b_square))
+    C_comp = C*(c_square*(a_square+b_square-c_square))
+    divisor = 2*(a_square*b_square+a_square*c_square+b_square*c_square)-(a**4+b**4+c**4)
+    circumcenter = (A_comp+B_comp+C_comp) / divisor
+
+    return circumcenter
+
+# computes surface circumcenter in ambient space
+def calculate_surface_circumcenter(scdt, delta_index):
+    def calculate_center_line(scdt, delta_index):
+        vertices, _, triangles = scdt
+        i0, i1, i2 = triangles[delta_index]
+        a = vertices[i0].XYZ_vec3()
+        b = vertices[i1].XYZ_vec3()
+        c = vertices[i2].XYZ_vec3()
+
+        cc = calculate_circumcenter(scdt, delta_index)
+        n = normalize(np.cross(b-a, c-a))
+
+        return gp_Lin(gp_Pnt(cc[0], cc[1], cc[2]), gp_Dir(n[0], n[1], n[2]))
+    vertices, _, triangles = scdt
+    face = vertices[triangles[delta_index][0]].face
+
+    center_line = calculate_center_line(scdt, delta_index)
+    intersector = IntCurvesFace_Intersector(face, 0.0001)
+    intersector.Perform(center_line, -float('inf'), float('inf'))
+    if intersector.IsDone():
+        if intersector.NbPnt() == 1:
+            pnt = intersector.Pnt(1)
+            scc = np.array((pnt.X(), pnt.Y(), pnt.Z()))
+            return scc
+        elif intersector.NbPnt() < 1:
+            raise Exception('calculate_surface_circumcenter() error - no intersection')
+        else:
+            raise Exception('calculate_surface_circumcenter() error - multiple intersections')
+    else:
+        raise Exception('calculate_surface_circumcenter() error - intersector not done')
 
 #TODO figure out how to do this
-def travel(scdt, delta, c):
+def travel(scdt, delta_index, c):
     #TODO
 
     return -1 #TODO stub
@@ -305,6 +356,11 @@ def chew93_Surface(vertices, wire_meshes):
 
     # step 2+3: find largest triangle that fails shape ans size criteria
     delta_index = find_largest_failing_triangle(scdt)
+    insert_circumcenter(scdt, calculate_circumcenter(scdt, delta_index))
+    try:
+        insert_circumcenter(scdt, calculate_surface_circumcenter(scdt, delta_index))
+    except Exception as e:
+        print(e)
 
     #while delta_index >= 0:
         # step 4: travel across the from any of delta's corners to c
@@ -342,6 +398,7 @@ def mesher(path, write_mesh1D=True):
     # print('>> mesh samples w/ chew93_2D')
     print('>> mesh samples as CDT per face')
     calculate_triangulation(mesh)
+    # mesh.reset_bounding_boxes()
 
     return mesh
 
