@@ -19,6 +19,7 @@ from meshkD import SuperVertex, MeshkD
 
 from OCC.Core.gp import gp_Pnt, gp_Dir, gp_Lin
 from OCC.Core.IntCurvesFace import IntCurvesFace_Intersector
+from OCC.Core.TopAbs import TopAbs_ON, TopAbs_IN
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 INPUT_PATH = paths.PATH_TEST1
@@ -285,6 +286,7 @@ def calculate_surface_circumcenter(scdt, delta_index):
     if intersector.IsDone():
         if intersector.NbPnt() == 1:
             pnt = intersector.Pnt(1)
+            assert intersector.State(1) == TopAbs_IN
             scc = np.array((pnt.X(), pnt.Y(), pnt.Z()))
             return scc
         elif intersector.NbPnt() < 1:
@@ -356,11 +358,20 @@ def chew93_Surface(vertices, wire_meshes):
 
     # step 2+3: find largest triangle that fails shape ans size criteria
     delta_index = find_largest_failing_triangle(scdt)
-    insert_circumcenter(scdt, calculate_circumcenter(scdt, delta_index))
-    try:
-        insert_circumcenter(scdt, calculate_surface_circumcenter(scdt, delta_index))
-    except Exception as e:
-        print(e)
+    #TODO remove
+    cc = calculate_circumcenter(scdt, delta_index)
+    p0 = vertices[triangles[delta_index][0]].XYZ_vec3()
+    p1 = vertices[triangles[delta_index][1]].XYZ_vec3()
+    p2 = vertices[triangles[delta_index][2]].XYZ_vec3()
+    n = normalize(calculate_normal(p0, p1, p2))
+    for i in range(101):
+        insert_circumcenter(scdt, cc+(2*i/10)*n)
+    # insert_circumcenter(scdt, calculate_circumcenter(scdt, delta_index))
+    # try:
+        # insert_circumcenter(scdt, calculate_surface_circumcenter(scdt, delta_index))
+    # except Exception as e:
+        # print(e)
+    #TODO remove
 
     #while delta_index >= 0:
         # step 4: travel across the from any of delta's corners to c
