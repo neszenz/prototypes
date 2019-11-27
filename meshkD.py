@@ -20,6 +20,7 @@ from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCC.Core.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BezierSurface, GeomAbs_BSplineSurface, GeomAbs_SurfaceOfRevolution, GeomAbs_SurfaceOfExtrusion, GeomAbs_OffsetSurface, GeomAbs_OtherSurface
 from OCC.Core.gp import gp_Pnt
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_Surface
+from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FORWARD, TopAbs_REVERSED
 
 BOUNDING_BOX_DEFAULT = (
     float('inf'), float('-inf'),
@@ -60,6 +61,10 @@ class SuperVertex:
     def XYZ_vec3(self):
         return np.array([self.x, self.y, self.z])
 
+    def reverse_u(self):
+        last_u_parameter = BRepAdaptor_Surface(self.face).LastUParameter()
+        self.u = last_u_parameter - self.u
+
     def project_to_UV(self):
         assert self.face != None
         surface = BRep_Tool.Surface(self.face)
@@ -68,6 +73,8 @@ class SuperVertex:
         uv = analysis_surface.ValueOfUV(xyz, 0.0001)
         self.u = uv.X()
         self.v = uv.Y()
+        if self.face.Orientation() == TopAbs_REVERSED:
+            self.reverse_u()
     def project_to_XYZ(self):
         assert self.face != None
         surface = BRepAdaptor_Surface(self.face)

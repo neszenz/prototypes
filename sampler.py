@@ -19,7 +19,6 @@ from OCC.Core.ShapeAnalysis import shapeanalysis
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FORWARD, TopAbs_REVERSED
 from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopTools import TopTools_IndexedMapOfShape
-from OCC.Display.SimpleGui import init_display
 from OCC.Extend.DataExchange import read_step_file, write_step_file
 from OCC.Extend.TopologyUtils import TopologyExplorer
 
@@ -27,7 +26,7 @@ import paths
 from meshkD import SuperVertex, MeshkD
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-INPUT_PATH = paths.PATH_98613
+INPUT_PATH = paths.PATH_BOX
 
 class SAMPLER_TYPE: # enum for calling sampler factory
     SIMPLE = 0
@@ -100,7 +99,7 @@ def generate_mesh_framework(compound, shape_maps):
     print(',', ex.number_of_edges(), 'edges')
     cnt = 1 #TODO used for testing
     for face in ex.faces():
-        if cnt != 6: #TODO used for testing
+        if cnt != 3: #TODO used for testing
             cnt += 1 #TODO used for testing
             # continue #TODO used for testing
         face_framework = generate_face_framework(face, shape_maps)
@@ -162,6 +161,13 @@ def sample_edges_in_framework(framework, shape_maps, sampler_type):
         wire_meshes.append(wire_mesh)
 
         return
+    def reverse_u_of_all_vertices(face_mesh):
+        vertices, _, _, _ = face_mesh
+
+        for sv in vertices:
+            sv.reverse_u()
+
+        return
     face_meshes = []
 
     for face_framework in framework:
@@ -172,6 +178,9 @@ def sample_edges_in_framework(framework, shape_maps, sampler_type):
 
         for wire_framework in wire_frameworks:
             add_wire(face_mesh, wire_framework, shape_maps, sampler_type)
+
+        if face.Orientation() == TopAbs_REVERSED:
+            reverse_u_of_all_vertices(face_mesh)
 
         face_meshes.append(face_mesh)
 
