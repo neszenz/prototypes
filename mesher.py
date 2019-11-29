@@ -28,7 +28,7 @@ INPUT_PATH = paths.PATH_SURFFIL
 sampler.NUMBER_OF_SAMPLES = 10
 sampler.INCLUDE_INNER_WIRES = True
 SMALLEST_ANGLE = np.deg2rad(30)
-SIZE_THRESHOLD = 250.0
+SIZE_THRESHOLD = 500.0
 
 OUTPUT_DIR = 'tmp'
 # unitize timestamp prefix w/ sampler, so that output files have the same name
@@ -382,8 +382,6 @@ def longest_edge_vertex_indices(scdt, delta_index): #TODO check whether this wor
 
             return i2, i0
     else:
-        assert p12_length > p01_length
-
         if p12_length > p20_length:
             return i1, i2
         else:
@@ -586,7 +584,7 @@ def mesher(path, write_mesh1D=True):
     mesh = simple_sampler(INPUT_PATH)
 
     # print('>> mesh samples w/ chew93_2D')
-    print('>> mesh samples as CDT per face')
+    print('>> mesh samples with chew93_Surface')
     calculate_triangulation(mesh)
     # mesh.reset_bounding_boxes()
 
