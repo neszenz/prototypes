@@ -28,7 +28,7 @@ INPUT_PATH = paths.PATH_SURFFIL
 sampler.NUMBER_OF_SAMPLES = 10
 sampler.INCLUDE_INNER_WIRES = True
 SMALLEST_ANGLE = np.deg2rad(30)
-SIZE_THRESHOLD = 5.0
+SIZE_THRESHOLD = 860.0
 
 OUTPUT_DIR = 'tmp'
 # unitize timestamp prefix w/ sampler, so that output files have the same name
@@ -303,6 +303,8 @@ def find_largest_failing_triangle(scdt):
             if t_size > delta_size:
                 delta_size = t_size
                 delta_index = t_index
+            else:
+                assert delta_index >= 0
 
     return delta_index
 
@@ -361,16 +363,91 @@ def calculate_surface_circumcenter(scdt, delta_index):
     else:
         raise Exception('calculate_surface_circumcenter() error - intersector not done')
 
-#TODO check for guaranteed termination
-def segment_index_of_longest_edge(scdt, delta_index):
-    #TODO implement idea fom 26.11.
+def longest_edge_vertex_indices(scdt, delta_index): #TODO check whether this works correctly
+    vertices, pslg, triangles = scdt
+    i0, i1, i2 = triangles[delta_index]
+    p0 = vertices[i0].XYZ_vec3()
+    p1 = vertices[i1].XYZ_vec3()
+    p2 = vertices[i2].XYZ_vec3()
 
-    return -1 #TODO stub
+    p01_length = np.linalg.norm(p1-p0)
+    p12_length = np.linalg.norm(p2-p1)
+    p20_length = np.linalg.norm(p0-p2)
+
+    if p01_length > p12_length:
+        if p01_length > p20_length:
+            return i0, i1
+        else:
+            assert p20_length > p01_length
+
+            return i2, i0
+    else:
+        assert p12_length > p01_length
+
+        if p12_length > p20_length:
+            return i1, i2
+        else:
+            assert p20_length > p12_length
+
+            return i2, i0
+
+    return (-1, -1)
+
+#TODO check for guaranteed termination
+#TODO avoid problem regions? (p.40)
+def segment_index_of_longest_edge(scdt, edge_vertex_indices):
+    _, pslg, _ = scdt
+    segments, _, boundary_offset = pslg
+    ev0, ev1 = edge_vertex_indices
+
+    for s_index in range(len(segments)):
+        s0, s1 = segments[s_index]
+        if (ev0 == s0 and ev1 == s1) or\
+           (ev0 == s1 and ev1 == s0):
+            return s_index
+
+    return -1
+
+def halfway_of_longest_edge(scdt, edge_vertex_indices):
+    vertices, pslg, _ = scdt
+    segments, _, boundary_offset = pslg
+    ev0, ev1 = edge_vertex_indices
+
+    p0 = vertices[ev0].UV_vec2()
+    p1 = vertices[ev1].UV_vec2()
+    hw = p0 + (p1-p0)/2
+
+    tmp_sv = SuperVertex(u=hw[0], v=hw[1])
+    tmp_sv.face = vertices[ev0].face
+    tmp_sv.project_to_XYZ()
+
+    return tmp_sv.XYZ_vec3()
 
 def split_segment(scdt, segment_index):
-    #TODO implement offset-offset idea
+    vertices, pslg, _ = scdt
+    segments, _, boundary_offset = pslg
+    vi0, vi1 = segments[segment_index]
 
-    return
+    # compute and insert halfway vertex
+    sv0 = vertices[vi0]
+    sv1 = vertices[vi1]
+    sv_halfway = SuperVertex.compute_halfway_on_shared_edge(sv0, sv1)
+    # segment vertices are never deleted -> insert before inner vertices to avoid index shift
+    hw_index = len(segments) # == num of segment vertices
+    vertices.insert(hw_index, sv_halfway)
+    print('inserted', str(sv_halfway), 'at', hw_index)
+
+    # delete old and insert new segments
+    del segments[segment_index]
+    new_s0 = (vi0, hw_index)
+    new_s1 = (hw_index, vi1)
+    segments.insert(segment_index, new_s1)
+    segments.insert(segment_index, new_s0)
+
+    if segment_index < boundary_offset:
+        boundary_offset += 1
+
+    return boundary_offset
 
 def insert_inner_vertex(scdt, c):
     vertices, _, _ = scdt
@@ -429,7 +506,8 @@ def chew93_Surface(vertices, wire_meshes):
 
         return segments, holes, boundary_offset
     # step 1: initial surface Delaunay triangulation
-    pslg = pslg_from_wires(vertices, wire_meshes)
+    segments, holes, boundary_offset = pslg_from_wires(vertices, wire_meshes)
+    pslg = segments, holes, boundary_offset
     triangles = triangulate(vertices, pslg, wire_meshes)
     scdt = vertices, pslg, triangles
 
@@ -444,7 +522,10 @@ def chew93_Surface(vertices, wire_meshes):
     #insert_inner_vertex(scdt, cc+n)
     #TODO remove
 
+    iteration_counter = 0
     while delta_index >= 0:
+        print('iteration', iteration_counter)
+        iteration_counter += 1
         # step 4: travel across the from any of delta's corners to c
         try:
             c = calculate_surface_circumcenter(scdt, delta_index)
@@ -452,14 +533,17 @@ def chew93_Surface(vertices, wire_meshes):
             print(e)
             return triangles
 
-        if c == None:
-            s_index = segment_index_of_longest_edge(scdt, delta_index)
+        if c is None:
+            edge_vertex_indices = longest_edge_vertex_indices(scdt, delta_index)
+            s_index = segment_index_of_longest_edge(scdt, edge_vertex_indices)
+
             if s_index >= 0:
                 # step 6: split segment; remove encroaching inner vertices
-                split_segment(scdt, s_index)
+                boundary_offset = split_segment(scdt, s_index)
+                pslg = segments, holes, boundary_offset
             else:
-                # custom step for no intersection, no segment case
-                hw = halfway_of_longest_edge(scdt, delta_index)
+                # custom step for 'no intersection, no segment' case
+                hw = halfway_of_longest_edge(scdt, edge_vertex_indices)
                 insert_inner_vertex(scdt, hw)
         else:
             # step 5: no segment was hit; insert c
