@@ -5,4 +5,5 @@ Dependencies:
 - [pythonOCC](http://www.pythonocc.org)
 - [pytriangle](https://github.com/pletzer/pytriangle)
 - [pyglet](http://pyglet.org)
-- [PyMesh](https://pymesh.readthedocs.io/en/latest/)
+- [OpenMesh](https://openmesh-python.readthedocs.io/en/latest/)
+- [gerobust](https://github.com/aluriak/gerobust)
