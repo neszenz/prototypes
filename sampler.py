@@ -13,7 +13,7 @@ import os
 import pickle
 
 from OCC.Core.BRep import BRep_Tool
-from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Curve2d, BRepAdaptor_Surface
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from OCC.Core.ShapeAnalysis import shapeanalysis
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FORWARD, TopAbs_REVERSED
@@ -99,7 +99,7 @@ def generate_mesh_framework(compound, shape_maps):
     print(',', ex.number_of_edges(), 'edges')
     cnt = 1 #TODO used for testing
     for face in ex.faces():
-        if cnt != 3: #TODO used for testing
+        if cnt != 1: #TODO used for testing
             cnt += 1 #TODO used for testing
             # continue #TODO used for testing
         face_framework = generate_face_framework(face, shape_maps)
@@ -115,6 +115,7 @@ def edge_sampler_simple(edge_info, face, shape_maps):
         return edge_mesh
     surface = BRepAdaptor_Surface(face)
     curve, fp, lp = BRep_Tool.CurveOnSurface(edge, face)
+    curve = BRepAdaptor_Curve2d(edge, face) # should be the same, but for consistency w/ rest of code
     p_length = lp - fp
     for i in range(0, NUMBER_OF_SAMPLES):
         if i == NUMBER_OF_SAMPLES-1:
@@ -126,12 +127,11 @@ def edge_sampler_simple(edge_info, face, shape_maps):
         sv = SuperVertex(x=p3d.X(), y=p3d.Y(), z=p3d.Z(), u=p2d.X(), v=p2d.Y())
         sv.face_id = face_map.FindIndex(face)
         sv.face = face
-        sv.edge = edge
+        sv.edges_with_p = [(edge, parameter)]
         edge_mesh.append(sv)
     # here, the edges orientation are made consistent with that of the wire
-    if edge.Orientation() != wire.Orientation(): # corrects origentation to keep edges consistent in wire
+    if edge.Orientation() != wire.Orientation(): # corrects ori to keep edges consistent in wire
         edge_mesh.reverse()
-    edge_mesh.pop() # remove last to connect with next edge mesh w/o double vertex
     return edge_mesh
 def sample_edges_in_framework(framework, shape_maps, sampler_type):
     def add_wire(face_mesh, wire_framework, shape_maps, sampler_type):
@@ -140,13 +140,36 @@ def sample_edges_in_framework(framework, shape_maps, sampler_type):
         wire_vertices = []
         wire_mesh = []
 
+        edge_mesh_loop = []
+
+        # collect all edge meshes
         for edge_info in wire_framework:
             if sampler_type == SAMPLER_TYPE.SIMPLE:
                 edge_mesh = edge_sampler_simple(edge_info, face, shape_maps)
             else:
                 pass #TODO different sampler methods
 
-            wire_vertices += edge_mesh
+            edge_mesh_loop.append(edge_mesh)
+
+        # merge edge meshes together into a wire vertex loop
+        for i in range(len(edge_mesh_loop)):
+            curr_em = edge_mesh_loop[i]
+            next_em = edge_mesh_loop[(i+1) % len(edge_mesh_loop)]
+            if curr_em[-1] == next_em[0]:
+                assert not curr_em[-1].edges_with_p is None
+                assert not next_em[0].edges_with_p is None
+                assert len(curr_em[-1].edges_with_p) == 1
+                assert len(next_em[0].edges_with_p) == 1
+
+                # merge edge list in connection and insert current into wire_mesh
+                next_em[0].edges_with_p = curr_em[-1].edges_with_p + next_em[0].edges_with_p
+                curr_em.pop()
+
+                wire_vertices += curr_em
+            else:
+                print('sample_edges_in_framework() error - wire connectivity degenerated')
+                wire_vertices += curr_em
+                return
 
         # construct indexed wire mesh
         offset = len(vertices)

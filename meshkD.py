@@ -16,7 +16,8 @@ bounding_box3D: for xyz coordinates
 import numpy as np
 
 from OCC.Core.BRep import BRep_Tool
-from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Curve2d, BRepAdaptor_Surface
+from OCC.Core.GCPnts import GCPnts_AbscissaPoint
 from OCC.Core.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BezierSurface, GeomAbs_BSplineSurface, GeomAbs_SurfaceOfRevolution, GeomAbs_SurfaceOfExtrusion, GeomAbs_OffsetSurface, GeomAbs_OtherSurface
 from OCC.Core.gp import gp_Pnt
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_Surface
@@ -50,9 +51,53 @@ class SuperVertex:
         self.z = z
         self.u = u
         self.v = v
+
         self.face_id = 0
         self.face = None
-        self.edge = None
+
+        # None: inner vertex
+        # len-1-list: vertex on boundary
+        # len-2-list: vertex on boundary endpoint
+        self.edges_with_p = None # tuple of TopoDS_EDGE and sample parameter
+
+    def compute_halfway_on_shared_edge(sv0, sv1):
+        def get_shared_edge(sv0, sv1):
+            for sv0_edge_with_p in sv0.edges_with_p:
+                sv0_edge, sv0_p = sv0_edge_with_p
+
+                for sv1_edge_with_p in sv1.edges_with_p:
+                    sv1_edge, sv1_p = sv1_edge_with_p
+
+                    if sv0_edge == sv1_edge:
+                        u0 = min(sv0_p, sv1_p)
+                        u1 = max(sv0_p, sv1_p)
+
+                        return sv0_edge, u0, u1
+
+            return None, -1, -1
+        assert sv0.face_id== sv1.face_id
+        assert not sv0.edges_with_p is None
+        assert not sv1.edges_with_p is None
+
+        shared_edge, u0, u1 = get_shared_edge(sv0, sv1)
+        if shared_edge is None:
+            raise Exception('compute_halfway_on_shared_edge() error - no shared edge')
+        curve = BRepAdaptor_Curve2d(shared_edge, sv0.face)
+        u01_length = GCPnts_AbscissaPoint.Length(curve, u0, u1)
+
+        abscissa_point = GCPnts_AbscissaPoint(curve, u01_length/2, u0)
+        assert abscissa_point.IsDone()
+
+        p = abscissa_point.Parameter()
+        uv = curve.Value(p)
+        xyz = BRepAdaptor_Surface(sv0.face).Value(uv.X(), uv.Y())
+
+        sv_halfway = SuperVertex(x=xyz.X(), y=xyz.Y(), z=xyz.Z(), u=uv.X(), v=uv.Y())
+        sv_halfway.face_id = sv0.face_id
+        sv_halfway.face = sv0.face
+        sv_halfway.edges_with_p = [(shared_edge, p)]
+
+        return sv_halfway
 
     def UV_vec2(self):
         return np.array([self.u, self.v])
@@ -91,7 +136,7 @@ class SuperVertex:
         return self.allclose_UV(other) and self.allclose_XYZ(other) and self.face_id == other.face_id
 
     def __str__(self):
-        return '(' + str(self.XYZ_vec3()) + ', ' + str(self.UV_vec2()) + ', ' + str(self.face_id) + ')'
+        return '(' + str(self.XYZ_vec3()) + ', ' + str(self.UV_vec2()) + ', ' + str(self.face_id) + ', ' + str(self.edges_with_p) + ')'
     def __repr__(self):
         return self.__str__()
 
