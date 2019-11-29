@@ -7,6 +7,8 @@ To gain a foundation for the meshing process, sampler.py is used to generate a
 first step is to compute constrained Delaunay Triangulations w/ pytriangle and
 then apply my implementation of Chew's Surface Delaunay Refinement algorithm.
 """
+import datetime
+from gerobust.predicates import clockwise, counter_clockwise
 import numpy as np
 import os
 import pickle
@@ -22,14 +24,14 @@ from OCC.Core.IntCurvesFace import IntCurvesFace_Intersector
 from OCC.Core.TopAbs import TopAbs_ON, TopAbs_IN
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-INPUT_PATH = paths.PATH_TEST1
+INPUT_PATH = paths.PATH_SURFFIL
 sampler.NUMBER_OF_SAMPLES = 10
+sampler.INCLUDE_INNER_WIRES = True
 SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = 5.0
 
 OUTPUT_DIR = 'tmp'
 # unitize timestamp prefix w/ sampler, so that output files have the same name
-OUTPUT_PREFIX = sampler.OUTPUT_PREFIX
 
 def normalize(vector):
     vNorm = np.linalg.norm(vector)
@@ -38,11 +40,16 @@ def normalize(vector):
     else:
         return vector / vNorm
 
-def calculate_angle(p0, p1, p2):
+def calculate_angle_in_corner(p0, p1, p2):
     p10 = normalize(p0 - p1)
     p12 = normalize(p2 - p1)
 
     dp = max(-1.0, min(1.0, np.dot(p10, p12)))
+
+    return np.arccos(dp)
+
+def calculate_angle_between_vectors(v0, v1):
+    dp = max(-1.0, min(1.0, np.dot(v0, v1)))
 
     return np.arccos(dp)
 
@@ -52,12 +59,19 @@ def calculate_normal(p0, p1, p2):
 
     return np.cross(p12, p10)
 
+def calculate_normal_normalized(p0, p1, p2):
+    return normalize(calculate_normal(p0, p1, p2))
+
 def calculate_area(p0, p1, p2):
     return np.linalg.norm(calculate_normal(p0, p1, p2)) / 2.0
 
+def left_hand_perpendicular(v):
+    assert len(v) == 2
+    return np.array((v[1], -v[0]))
+
 ## BEGINE OF CHEW93_SURFACE  = + = + = + = + = + = + = + = + = + = + = + = + = +
 # 1st: builds CDT meeting normal criteria; 2nd: filps edges until surface CDT
-def triangulate(vertices, pslg):
+def triangulate(vertices, pslg, wire_meshes):
     def triangulate_cdt(vertices, pslg):
         segments, holes, boundary_offset = pslg
         triangles = []
@@ -80,6 +94,20 @@ def triangulate(vertices, pslg):
             triangles.append((i0, i1, i2))
 
         return triangles
+    def trim_triangulation(triangles, wire_meshes):
+        t_index = 0
+        while t_index < len(triangles):
+            i0, i1, i2 = triangles[t_index]
+
+            for inner_wire in wire_meshes[1:]:
+                if i0 in inner_wire and i1 in inner_wire and i2 in inner_wire:
+                    del triangles[t_index]
+                    t_index -= 1
+                    break
+
+            t_index += 1
+
+        return
     def scdt_from_cdt(vertices, cdt_triangles):
         def openmesh_from_cdt(vertices, triangles):
             omesh = openmesh.TriMesh()
@@ -102,24 +130,11 @@ def triangulate(vertices, pslg):
                     return False
 
             return True
-        def flip_one_non_scdt_edge(omesh):
-            def flip_improves_mesh(omesh, eh):
-                def get_min_face_angle(triangle):
-                    p0, p1, p2 = triangle
-
-                    alpha = calculate_angle(p0, p1, p2)
-                    beta = calculate_angle(p1, p2, p0)
-                    gamma = calculate_angle(p2, p0, p1)
-                    assert np.allclose((alpha+beta+gamma), np.pi)
-
-                    min_angle = min(alpha, beta, gamma)
-                    assert min_angle >= 0.0
-
-                    return min(alpha, beta, gamma)
+        def flip_one_non_scdt_edge(omesh, vertices):
+            def collect_quadrilateral_vertices(omesh, eh):
                 heh0 = omesh.halfedge_handle(eh, 0)
                 heh1 = omesh.halfedge_handle(eh, 1)
 
-                # collect quadrilateral vertex points of adjacent triangles
                 heh_tmp = heh0
                 vh0 = omesh.from_vertex_handle(heh_tmp)
                 heh_tmp = omesh.next_halfedge_handle(heh_tmp)
@@ -133,6 +148,49 @@ def triangulate(vertices, pslg):
                 heh_tmp = omesh.next_halfedge_handle(heh_tmp)
                 vh3 = omesh.to_vertex_handle(heh_tmp)
 
+                return vh0, vh1, vh2, vh3
+            def would_flip_triangle_in_2D(omesh, eh, vertices):
+                vh0, vh1, vh2, vh3 = vhs
+
+                sv0 = vertices[vh0.idx()]
+                sv1 = vertices[vh1.idx()]
+                sv2 = vertices[vh2.idx()]
+                sv3 = vertices[vh3.idx()]
+                assert np.allclose(sv0.XYZ_vec3(), omesh.point(vh0))
+                assert np.allclose(sv1.XYZ_vec3(), omesh.point(vh1))
+                assert np.allclose(sv2.XYZ_vec3(), omesh.point(vh2))
+                assert np.allclose(sv3.XYZ_vec3(), omesh.point(vh3))
+
+                p0 = sv0.UV_vec2()
+                p1 = sv1.UV_vec2()
+                p2 = sv2.UV_vec2()
+                p3 = sv3.UV_vec2()
+
+                # situation before flip
+                t0 = (tuple(p0), tuple(p1), tuple(p2))
+                t1 = (tuple(p0), tuple(p3), tuple(p1))
+                # assert counter_clockwise(*t0) == True #TODO ran into errors maybe
+                # assert counter_clockwise(*t1) == True #TODO b/o degenerating flips
+
+                # situation after flip
+                t2 = (tuple(p3), tuple(p2), tuple(p0))
+                t3 = (tuple(p3), tuple(p1), tuple(p2))
+
+                return counter_clockwise(*t2) != True or counter_clockwise(*t3) != True
+            def flip_maximizes_minimum_angle(omesh, vhs):
+                def get_min_face_angle(triangle):
+                    p0, p1, p2 = triangle
+
+                    alpha = calculate_angle_in_corner(p0, p1, p2)
+                    beta = calculate_angle_in_corner(p1, p2, p0)
+                    gamma = calculate_angle_in_corner(p2, p0, p1)
+                    assert np.allclose((alpha+beta+gamma), np.pi)
+
+                    min_angle = min(alpha, beta, gamma)
+
+                    return min_angle
+                vh0, vh1, vh2, vh3 = vhs
+
                 p0 = omesh.point(vh0)
                 p1 = omesh.point(vh1)
                 p2 = omesh.point(vh2)
@@ -142,27 +200,29 @@ def triangulate(vertices, pslg):
                 t0 = (p0, p1, p2)
                 t1 = (p0, p3, p1)
                 min_angle_before = min(get_min_face_angle(t0), get_min_face_angle(t1))
-                t0_normal_before = calculate_normal(t0[0], t0[1], t0[2])
-                t1_normal_before = calculate_normal(t1[0], t1[1], t1[2])
+                # assert min_angle_before > 0.0 #TODO restoe
+                if min_angle_before == 0.0:
+                    print('min_angle_before:', min_angle_before)
 
                 # situation after flip
-                t0 = (p3, p2, p0)
-                t1 = (p3, p1, p2)
-                min_angle_after = min(get_min_face_angle(t0), get_min_face_angle(t1))
-                t0_normal_after = calculate_normal(t0[0], t0[1], t0[2])
-                t1_normal_after = calculate_normal(t1[0], t1[1], t1[2])
-
-                # make sure, the triangles were not flipped
-                if np.allclose(normalize(t0_normal_before), normalize(t0_normal_after)) or \
-                   np.allclose(normalize(t1_normal_before), normalize(t1_normal_after)):
-                    return False
+                t2 = (p3, p2, p0)
+                t3 = (p3, p1, p2)
+                min_angle_after = min(get_min_face_angle(t2), get_min_face_angle(t3))
+                # assert min_angle_after > 0.0 #TODO restoe
+                if min_angle_after == 0.0:
+                    print('min_angle_after:', min_angle_after)
 
                 return min_angle_after > min_angle_before
             for eh in omesh.edges():
                 if omesh.is_boundary(eh):
                     continue
 
-                if flip_improves_mesh(omesh, eh):
+                vhs = collect_quadrilateral_vertices(omesh, eh)
+
+                if would_flip_triangle_in_2D(omesh, vhs, vertices):
+                    continue
+
+                if flip_maximizes_minimum_angle(omesh, vhs):
                     assert omesh.is_flip_ok(eh)
                     omesh.flip(eh)
                     return True
@@ -186,13 +246,18 @@ def triangulate(vertices, pslg):
         omesh = openmesh_from_cdt(vertices, cdt_triangles)
         assert are_consistent(omesh, vertices)
 
-        while flip_one_non_scdt_edge(omesh):
+        # if TMP:
+            # for i in range(TMP2):
+                # flip_one_non_scdt_edge(omesh, vertices)
+        # else:
+        while flip_one_non_scdt_edge(omesh, vertices):
             continue
 
         scdt_triangles = triangles_from_omesh(omesh)
 
         return scdt_triangles
     triangles = triangulate_cdt(vertices, pslg)
+    trim_triangulation(triangles, wire_meshes)
 
     #TODO check/ enforce face-normal-criteria
 
@@ -208,9 +273,9 @@ def find_largest_failing_triangle(scdt):
         p1 = vertices[i1].XYZ_vec3()
         p2 = vertices[i2].XYZ_vec3()
 
-        alpha = calculate_angle(p0, p1, p2)
-        beta = calculate_angle(p1, p2, p0)
-        gamma = calculate_angle(p2, p0, p1)
+        alpha = calculate_angle_in_corner(p0, p1, p2)
+        beta = calculate_angle_in_corner(p1, p2, p0)
+        gamma = calculate_angle_in_corner(p2, p0, p1)
 
         return min(alpha, beta, gamma) > SMALLEST_ANGLE
     def size_test(scdt, t_index):
@@ -290,24 +355,24 @@ def calculate_surface_circumcenter(scdt, delta_index):
             scc = np.array((pnt.X(), pnt.Y(), pnt.Z()))
             return scc
         elif intersector.NbPnt() < 1:
-            raise Exception('calculate_surface_circumcenter() error - no intersection')
+            return None
         else:
             raise Exception('calculate_surface_circumcenter() error - multiple intersections')
     else:
         raise Exception('calculate_surface_circumcenter() error - intersector not done')
 
-#TODO figure out how to do this
-def travel(scdt, delta_index, c):
-    #TODO
+#TODO check for guaranteed termination
+def segment_index_of_longest_edge(scdt, delta_index):
+    #TODO implement idea fom 26.11.
 
     return -1 #TODO stub
 
 def split_segment(scdt, segment_index):
-    #TODO
+    #TODO implement offset-offset idea
 
     return
 
-def insert_circumcenter(scdt, c):
+def insert_inner_vertex(scdt, c):
     vertices, _, _ = scdt
     assert len(vertices) > 0
 
@@ -321,11 +386,20 @@ def insert_circumcenter(scdt, c):
     return
 
 def chew93_Surface(vertices, wire_meshes):
-    def pslg_from_wires(wire_meshes):
-        def calculate_hole(wire_mesh):
-            #TODO
+    def pslg_from_wires(vertices, wire_meshes):
+        def calculate_hole(vertices, wire_mesh): #TODO remove when not needed anymore
+            if len(wire_mesh) <= 2:
+                return []
 
-            return []
+            a = vertices[wire_mesh[0]].UV_vec2()
+            b = vertices[wire_mesh[1]].UV_vec2()
+            ab = b-a
+            halfway = a + 0.5*ab
+            normal = left_hand_perpendicular(ab)
+            hole_point = halfway + normal
+            #TODO improve solution for general cases
+
+            return [tuple(hole_point)]
         segments = []
         holes = []
         boundary_offset = 0
@@ -346,48 +420,55 @@ def chew93_Surface(vertices, wire_meshes):
                     wire_segments.append((i0, i1)) # keep ccw order
                 else:
                     wire_segments.insert(0, (i1, i0)) # change cw to ccw for pytriangle
-                    holes += calculate_hole(wire_mesh)
+
+            #TODO remove when not needed anymore
+            # if wire_index > 0:
+                # holes += calculate_hole(vertices, wire_mesh)
 
             segments += wire_segments
 
         return segments, holes, boundary_offset
     # step 1: initial surface Delaunay triangulation
-    pslg = pslg_from_wires(wire_meshes)
-    triangles = triangulate(vertices, pslg)
+    pslg = pslg_from_wires(vertices, wire_meshes)
+    triangles = triangulate(vertices, pslg, wire_meshes)
     scdt = vertices, pslg, triangles
 
     # step 2+3: find largest triangle that fails shape ans size criteria
     delta_index = find_largest_failing_triangle(scdt)
     #TODO remove
-    cc = calculate_circumcenter(scdt, delta_index)
-    p0 = vertices[triangles[delta_index][0]].XYZ_vec3()
-    p1 = vertices[triangles[delta_index][1]].XYZ_vec3()
-    p2 = vertices[triangles[delta_index][2]].XYZ_vec3()
-    n = normalize(calculate_normal(p0, p1, p2))
-    for i in range(101):
-        insert_circumcenter(scdt, cc+(2*i/10)*n)
-    # insert_circumcenter(scdt, calculate_circumcenter(scdt, delta_index))
-    # try:
-        # insert_circumcenter(scdt, calculate_surface_circumcenter(scdt, delta_index))
-    # except Exception as e:
-        # print(e)
+    #cc = calculate_circumcenter(scdt, delta_index)
+    #p0 = vertices[triangles[delta_index][0]].XYZ_vec3()
+    #p1 = vertices[triangles[delta_index][1]].XYZ_vec3()
+    #p2 = vertices[triangles[delta_index][2]].XYZ_vec3()
+    #n = normalize(calculate_normal(p0, p1, p2))
+    #insert_inner_vertex(scdt, cc+n)
     #TODO remove
 
-    #while delta_index >= 0:
+    while delta_index >= 0:
         # step 4: travel across the from any of delta's corners to c
-        #c = surface_circumcenter(scdt, delta_index)
-        #hit_segment_index = travel(scdt, delta_index, c)
+        try:
+            c = calculate_surface_circumcenter(scdt, delta_index)
+        except Exception as e:
+            print(e)
+            return triangles
 
-        #if hit_segment_index >= 0:
-            # step 6: split segment; remove encroaching inner vertices
-            #split_segment(scdt, hit_segment_index)
-        #else:
+        if c == None:
+            s_index = segment_index_of_longest_edge(scdt, delta_index)
+            if s_index >= 0:
+                # step 6: split segment; remove encroaching inner vertices
+                split_segment(scdt, s_index)
+            else:
+                # custom step for no intersection, no segment case
+                hw = halfway_of_longest_edge(scdt, delta_index)
+                insert_inner_vertex(scdt, hw)
+        else:
             # step 5: no segment was hit; insert c
-            #insert_circumcenter(scdt, c)
+            insert_inner_vertex(scdt, c)
 
         # update for next loop
-        #scdt = vertices, pslg, triangulate_scdt(vertices, pslg)
-        #delta_index = find_largest_failing_triangle(scdt)
+        triangles = triangulate(vertices, pslg, wire_meshes)
+        scdt = vertices, pslg, triangles
+        delta_index = find_largest_failing_triangle(scdt)
 
     return triangles
 ## END OF CHEW93_SURFACE = + = + = + = + = + = + = + = + = + = + = + = + = + = +
@@ -415,7 +496,8 @@ def mesher(path, write_mesh1D=True):
 
 def write_mesh_to_file(mesh2D):
     def generate_output_file_path():
-        name = OUTPUT_PREFIX + MeshkD.FILE_EXTENSION
+        timestamp = datetime.datetime.now()
+        name = timestamp.strftime('%y%m%d_%H%M%S') + MeshkD.FILE_EXTENSION
         path = os.path.join(OUTPUT_DIR, name)
 
         if os.path.exists(path):
@@ -433,5 +515,10 @@ def write_mesh_to_file(mesh2D):
     return
 
 if __name__ == '__main__':
-    mesh = mesher(INPUT_PATH)
-    write_mesh_to_file(mesh)
+    TMP = False
+    for i in range(1):
+        TMP2 = i
+        print(TMP2)
+        mesh = mesher(INPUT_PATH)
+        write_mesh_to_file(mesh)
+        TMP = False
