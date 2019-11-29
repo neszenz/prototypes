@@ -28,7 +28,7 @@ INPUT_PATH = paths.PATH_SURFFIL
 sampler.NUMBER_OF_SAMPLES = 10
 sampler.INCLUDE_INNER_WIRES = True
 SMALLEST_ANGLE = np.deg2rad(30)
-SIZE_THRESHOLD = 860.0
+SIZE_THRESHOLD = 250.0
 
 OUTPUT_DIR = 'tmp'
 # unitize timestamp prefix w/ sampler, so that output files have the same name
@@ -443,6 +443,20 @@ def split_segment(scdt, segment_index):
     new_s1 = (hw_index, vi1)
     segments.insert(segment_index, new_s1)
     segments.insert(segment_index, new_s0)
+
+    # delete encroaching vertices
+    new_segments_length = np.linalg.norm(sv0.XYZ_vec3() - sv_halfway.XYZ_vec3())
+    inner_vertices_offset = hw_index+1
+    sv_index = inner_vertices_offset
+    while sv_index < len(vertices):
+        sv = vertices[sv_index]
+        dist_to_hw = np.linalg.norm(sv.XYZ_vec3() - sv_halfway.XYZ_vec3())
+
+        if dist_to_hw < new_segments_length:
+            print('delete', sv_index)
+            del vertices[sv_index]
+        else:
+            sv_index += 1
 
     if segment_index < boundary_offset:
         boundary_offset += 1
