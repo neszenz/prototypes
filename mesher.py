@@ -31,7 +31,6 @@ SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = 500.0
 
 OUTPUT_DIR = 'tmp'
-# unitize timestamp prefix w/ sampler, so that output files have the same name
 
 def normalize(vector):
     vNorm = np.linalg.norm(vector)
@@ -73,7 +72,7 @@ def left_hand_perpendicular(v):
 # 1st: builds CDT meeting normal criteria; 2nd: filps edges until surface CDT
 def triangulate(vertices, pslg, wire_meshes):
     def triangulate_cdt(vertices, pslg):
-        segments, holes, boundary_offset = pslg
+        segments, boundary_offset = pslg
         triangles = []
 
         t = shewchuk_triangle.Triangle()
@@ -85,7 +84,6 @@ def triangulate(vertices, pslg, wire_meshes):
 
         t.set_points(points, markers=markers)
         t.set_segments(segments)
-        t.set_holes(holes)
 
         t.triangulate(mode='pzQ')
 
@@ -395,7 +393,7 @@ def longest_edge_vertex_indices(scdt, delta_index): #TODO check whether this wor
 #TODO avoid problem regions? (p.40)
 def segment_index_of_longest_edge(scdt, edge_vertex_indices):
     _, pslg, _ = scdt
-    segments, _, boundary_offset = pslg
+    segments, boundary_offset = pslg
     ev0, ev1 = edge_vertex_indices
 
     for s_index in range(len(segments)):
@@ -408,7 +406,7 @@ def segment_index_of_longest_edge(scdt, edge_vertex_indices):
 
 def halfway_of_longest_edge(scdt, edge_vertex_indices):
     vertices, pslg, _ = scdt
-    segments, _, boundary_offset = pslg
+    segments, boundary_offset = pslg
     ev0, ev1 = edge_vertex_indices
 
     p0 = vertices[ev0].UV_vec2()
@@ -423,7 +421,7 @@ def halfway_of_longest_edge(scdt, edge_vertex_indices):
 
 def split_segment(scdt, segment_index):
     vertices, pslg, _ = scdt
-    segments, _, boundary_offset = pslg
+    segments, boundary_offset = pslg
     vi0, vi1 = segments[segment_index]
 
     # compute and insert halfway vertex
@@ -476,21 +474,7 @@ def insert_inner_vertex(scdt, c):
 
 def chew93_Surface(vertices, wire_meshes):
     def pslg_from_wires(vertices, wire_meshes):
-        def calculate_hole(vertices, wire_mesh): #TODO remove when not needed anymore
-            if len(wire_mesh) <= 2:
-                return []
-
-            a = vertices[wire_mesh[0]].UV_vec2()
-            b = vertices[wire_mesh[1]].UV_vec2()
-            ab = b-a
-            halfway = a + 0.5*ab
-            normal = left_hand_perpendicular(ab)
-            hole_point = halfway + normal
-            #TODO improve solution for general cases
-
-            return [tuple(hole_point)]
         segments = []
-        holes = []
         boundary_offset = 0
 
         if len(wire_meshes) > 0:
@@ -510,16 +494,12 @@ def chew93_Surface(vertices, wire_meshes):
                 else:
                     wire_segments.insert(0, (i1, i0)) # change cw to ccw for pytriangle
 
-            #TODO remove when not needed anymore
-            # if wire_index > 0:
-                # holes += calculate_hole(vertices, wire_mesh)
-
             segments += wire_segments
 
-        return segments, holes, boundary_offset
+        return segments, boundary_offset
     # step 1: initial surface Delaunay triangulation
-    segments, holes, boundary_offset = pslg_from_wires(vertices, wire_meshes)
-    pslg = segments, holes, boundary_offset
+    segments, boundary_offset = pslg_from_wires(vertices, wire_meshes)
+    pslg = segments, boundary_offset
     triangles = triangulate(vertices, pslg, wire_meshes)
     scdt = vertices, pslg, triangles
 
@@ -552,7 +532,7 @@ def chew93_Surface(vertices, wire_meshes):
             if s_index >= 0:
                 # step 6: split segment; remove encroaching inner vertices
                 boundary_offset = split_segment(scdt, s_index)
-                pslg = segments, holes, boundary_offset
+                pslg = segments, boundary_offset
             else:
                 # custom step for 'no intersection, no segment' case
                 hw = halfway_of_longest_edge(scdt, edge_vertex_indices)
