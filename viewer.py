@@ -20,6 +20,10 @@ SAVE_ZONE_FACTOR = 0.7 # scale weight for model size to window ratio
 ROTATION_STEP_SLOW = 1
 ROTATION_STEP_FAST = 5
 TILT_DEFAULT = 0
+COLOR_WIREFRAME = (0.6, 0.6, 0.6)
+COLOR_BOUNDARY = (1.0, 1.0, 1.0)
+COLOR_BBOX = (0.5, 0.5, 0.0)
+COLOR_VERTICES = (1.0, 0.0, 0.0)
 
 ## global variables  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 meshes = [] # list of tuples (mesh1D, mesh2D)
@@ -34,6 +38,7 @@ flags = {
     'draw_vertices' : True,
     'draw_mesh1D' : True,
     'draw_mesh2D' : True,
+    'flat_shading' : False,
     'draw_2d_mode' : False,
     'draw_origin' : False,
     'arrow_mode' : False, # draw lines as arrows; only in individual face mode
@@ -151,6 +156,8 @@ def on_key_press(symbol, modifiers):
             flags['draw_origin'] = not flags['draw_origin']
         if symbol == key.A:
             flags['arrow_mode'] = not flags['arrow_mode']
+        if symbol == key.S:
+            flags['flat_shading'] = not flags['flat_shading']
         if symbol == key.F:
             flags['draw_2d_mode'] = not flags['draw_2d_mode']
         if symbol == key.J:
@@ -239,7 +246,7 @@ def on_draw():
         else:
             bounding_box = mesh.bounding_box3D
         x_min, x_max, y_min, y_max, z_min, z_max = bounding_box
-        glColor3f(0.5, 0.5, 0.0)
+        glColor3f(*COLOR_BBOX)
         glBegin(GL_LINE_LOOP)
         glVertex3f(x_min, y_min, z_min)
         glVertex3f(x_max, y_min, z_min)
@@ -289,6 +296,7 @@ def on_draw():
                         glVertex3f(v1[0], v1[1], v1[2])
                         glVertex3f(vb[0], vb[1], vb[2])
                         glVertex3f(v1[0], v1[1], v1[2])
+                glColor3f(*COLOR_BOUNDARY)
                 glBegin(GL_LINES)
                 for vertex_index in range(len(wire_mesh)):
                     sv0 = vertices[wire_mesh[vertex_index]]
@@ -309,31 +317,42 @@ def on_draw():
                     v1 = sv1.XYZ_vec3()
                     v2 = sv2.XYZ_vec3()
 
+                if flags['flat_shading']:
+                    normal = np.cross(v1-v0, v2-v0)
+                    if np.linalg.norm(normal) == 0.0:
+                        glColor3f(*COLOR_WIREFRAME)
+                    else:
+                        normal /= np.linalg.norm(normal)
+                        glColor3f(*np.abs(normal))
+                else:
+                    glColor3f(*COLOR_WIREFRAME)
+
+
                 glVertex3f(v0[0], v0[1], v0[2])
                 glVertex3f(v1[0], v1[1], v1[2])
                 glVertex3f(v2[0], v2[1], v2[2])
 
                 return
-            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+            if not flags['flat_shading']:
+                glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
             vertices, _, triangles, _ = face_mesh
 
+            glEnable(GL_DEPTH_TEST)
             glBegin(GL_TRIANGLES)
-
             for triangle in triangles:
                 i0, i1, i2 = triangle
                 draw_triangle(vertices[i0], vertices[i1], vertices[i2])
 
             glEnd()
+            glDisable(GL_DEPTH_TEST)
             return
         for face_index in range(mesh.number_of_faces()):
             if gvars['face_index'] > 0 and gvars['face_index']-1 != face_index:
                 continue
             face_mesh = mesh.face_meshes[face_index]
             if flags['draw_mesh2D']:
-                glColor3f(0.6, 0.6, 0.6)
                 draw_face2D(face_mesh)
             if flags['draw_mesh1D']:
-                glColor3f(1.0, 1.0, 1.0)
                 draw_face1D(face_mesh)
     def draw_vertices(mesh):
         def draw_super_vertex(sv):
@@ -407,7 +426,7 @@ def on_draw():
             draw_label(1, 'draw face '+face_id_from_total+' ('+face_type+')')
     global flags, gvars
     window.set_caption(window_caption)
-    glClear(GL_COLOR_BUFFER_BIT)
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     if len(meshes) == 0:
         draw_no_meshes_msg()
         return
