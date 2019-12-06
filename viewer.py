@@ -9,6 +9,7 @@ from pyglet.gl import *
 from pyglet.window import key, mouse
 
 from meshkD import SuperVertex, MeshkD
+from util import *
 
 ## config constants  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 INPUT_DIR = 'tmp'
@@ -20,10 +21,10 @@ SAVE_ZONE_FACTOR = 0.7 # scale weight for model size to window ratio
 ROTATION_STEP_SLOW = 1
 ROTATION_STEP_FAST = 5
 TILT_DEFAULT = 0
-COLOR_WIREFRAME = (0.6, 0.6, 0.6)
-COLOR_BOUNDARY = (1.0, 1.0, 1.0)
-COLOR_BBOX = (0.5, 0.5, 0.0)
-COLOR_VERTICES = (1.0, 0.0, 0.0)
+COLOR_WIREFRAME = np.array((0.6, 0.6, 0.6))
+COLOR_BOUNDARY = np.array((1.0, 1.0, 1.0))
+COLOR_BBOX = np.array((0.5, 0.5, 0.0))
+COLOR_VERTICES = np.array((1.0, 0.0, 0.0))
 
 ## global variables  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 meshes = [] # list of tuples (mesh1D, mesh2D)
@@ -241,6 +242,8 @@ def on_draw():
         glTranslatef(-center[0], -center[1], -center[2])
         update_direction_of_flight()
     def draw_bb(mesh):
+        if not flags['draw_bounding_box']:
+            return
         if flags['draw_2d_mode']:
             bounding_box = mesh.bounding_box2D
         else:
@@ -269,8 +272,8 @@ def on_draw():
         glVertex3f(x_min, y_max, z_min)
         glVertex3f(x_min, y_max, z_max)
         glEnd()
-    def draw_mesh(mesh):
-        def draw_face1D(face_mesh):
+    def draw_mesh1D(mesh):
+        def draw_face(face_mesh):
             def draw_wire(vertices, wire_mesh):
                 def draw_line(sv0, sv1):
                     global flags
@@ -296,18 +299,67 @@ def on_draw():
                         glVertex3f(v1[0], v1[1], v1[2])
                         glVertex3f(vb[0], vb[1], vb[2])
                         glVertex3f(v1[0], v1[1], v1[2])
-                glColor3f(*COLOR_BOUNDARY)
                 glBegin(GL_LINES)
+
+                glColor3f(*COLOR_BOUNDARY)
+
                 for vertex_index in range(len(wire_mesh)):
                     sv0 = vertices[wire_mesh[vertex_index]]
                     sv1 = vertices[wire_mesh[(vertex_index+1)%len(wire_mesh)]]
                     draw_line(sv0, sv1)
+
                 glEnd()
+
+                return
             vertices, wire_meshes, _, _ = face_mesh
+
+            glDisable(GL_DEPTH_TEST)
+
             for wire_mesh in wire_meshes:
                 draw_wire(vertices, wire_mesh)
-        def draw_face2D(face_mesh):
+
+            glEnable(GL_DEPTH_TEST)
+
+            return
+        if not flags['draw_mesh1D']:
+            return
+
+        for face_index in range(mesh.number_of_faces()):
+            if gvars['face_index'] > 0 and gvars['face_index']-1 != face_index:
+                continue
+            draw_face(mesh.face_meshes[face_index])
+    def draw_mesh2D(mesh):
+        def draw_face(face_mesh):
             def draw_triangle(sv0, sv1, sv2):
+                def phong(v0, v1, v2):
+                    N = calculate_normal_normalized(v0, v1, v2)
+                    if np.linalg.norm(N) == 0.0:
+                        return COLOR_WIREFRAME
+
+                    Iambi = np.abs(N)
+                    if flags['draw_2d_mode']:
+                        return Iambi
+
+                    L = normalize(np.array((1.0, 1.0, 1.0)))
+                    NL = np.dot(N, L)
+                    if NL > 0.0:
+                        R = normalize(2.0 * (N * NL) - L)
+                    else:
+                        R = np.array((0.0, 0.0, 0.0))
+
+                    if NL > 0.0:
+                        Idiff = np.abs(N) * NL
+                    else:
+                        Idiff = np.array((0.0, 0.0, 0.0))
+
+                    E = normalize(gvars['dof'])
+                    theta = np.dot(R, E)
+                    if theta > 0.0:
+                        Ispec = np.array((1.0, 1.0, 1.0)) * np.power(theta, 20)
+                    else:
+                        Ispec = np.array((0.0, 0.0, 0.0))
+
+                    return 0.6*Iambi + 0.4*Idiff + 0.3*Ispec
                 if flags['draw_2d_mode']:
                     v0 = sv0.UV_vec3()
                     v1 = sv1.UV_vec3()
@@ -317,43 +369,40 @@ def on_draw():
                     v1 = sv1.XYZ_vec3()
                     v2 = sv2.XYZ_vec3()
 
-                if flags['flat_shading']:
-                    normal = np.cross(v1-v0, v2-v0)
-                    if np.linalg.norm(normal) == 0.0:
-                        glColor3f(*COLOR_WIREFRAME)
-                    else:
-                        normal /= np.linalg.norm(normal)
-                        glColor3f(*np.abs(normal))
+                if not flags['flat_shading']:
+                    color = COLOR_WIREFRAME
                 else:
-                    glColor3f(*COLOR_WIREFRAME)
-
+                    color = phong(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+                glColor3f(*color)
 
                 glVertex3f(v0[0], v0[1], v0[2])
                 glVertex3f(v1[0], v1[1], v1[2])
                 glVertex3f(v2[0], v2[1], v2[2])
 
                 return
-            if not flags['flat_shading']:
+            if flags['flat_shading']:
+                glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
+            else:
                 glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+
             vertices, _, triangles, _ = face_mesh
 
-            glEnable(GL_DEPTH_TEST)
             glBegin(GL_TRIANGLES)
+
             for triangle in triangles:
                 i0, i1, i2 = triangle
                 draw_triangle(vertices[i0], vertices[i1], vertices[i2])
 
             glEnd()
-            glDisable(GL_DEPTH_TEST)
+
             return
+        if not flags['draw_mesh2D']:
+            return
+
         for face_index in range(mesh.number_of_faces()):
             if gvars['face_index'] > 0 and gvars['face_index']-1 != face_index:
                 continue
-            face_mesh = mesh.face_meshes[face_index]
-            if flags['draw_mesh2D']:
-                draw_face2D(face_mesh)
-            if flags['draw_mesh1D']:
-                draw_face1D(face_mesh)
+            draw_face(mesh.face_meshes[face_index])
     def draw_vertices(mesh):
         def draw_super_vertex(sv):
             if flags['draw_2d_mode']:
@@ -363,30 +412,42 @@ def on_draw():
             glVertex3f(x, y, z)
 
             return
+        if not flags['draw_vertices']:
+            return
+
         current_face_collection = []
 
+        glPointSize(4.0)
         glBegin(GL_POINTS)
+
+        glColor3f(*COLOR_VERTICES)
 
         for face_mesh in mesh.face_meshes:
             vertices, _, _, _ = face_mesh
 
-            if gvars['face_index'] == 0:
-                glColor3f(1.0, 1.0, 1.0)
-            else:
-                glColor3f(1.0, 0.0, 0.0)
-
             for sv in vertices:
-                if gvars['face_index'] == sv.face_id:
+                if gvars['face_index'] in [0, sv.face_id]:
                     current_face_collection.append(sv)
-                draw_super_vertex(sv)
+                else:
+                    draw_super_vertex(sv)
 
-        glColor3f(1.0, 1.0, 1.0)
+        glEnd()
+
+        glDisable(GL_DEPTH_TEST)
+        glBegin(GL_POINTS)
+
+        glColor3f(*COLOR_BOUNDARY)
+
         for sv in current_face_collection:
             draw_super_vertex(sv)
 
         glEnd()
+        glEnable(GL_DEPTH_TEST)
+
         return
     def draw_origin():
+        if not flags['draw_origin']:
+            return
         glBegin(GL_LINES)
         glColor3f(1.0, 0.0, 0.0)
         glVertex3f(0.0, 0.0, 0.0)
@@ -414,6 +475,7 @@ def on_draw():
                                       x=x_pos, y=y_pos, anchor_x='left', anchor_y='top')
             label.draw()
         global gvars
+        glDisable(GL_DEPTH_TEST)
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
         set_projection(window.width)
@@ -424,26 +486,28 @@ def on_draw():
             face_id_from_total = str(gvars['face_index']) + '/' + str(len(mesh.face_meshes))
             face_type = mesh.get_face_type(gvars['face_index']-1)
             draw_label(1, 'draw face '+face_id_from_total+' ('+face_type+')')
+        glEnable(GL_DEPTH_TEST)
     global flags, gvars
+
     window.set_caption(window_caption)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
     if len(meshes) == 0:
         draw_no_meshes_msg()
         return
     mesh = meshes[gvars['mesh_index']]
+
     set_projection(gvars['zoom'])
     set_modelview(mesh)
-    if flags['draw_bounding_box']:
-        draw_bb(mesh)
-    if gvars['face_index'] == 0:
-        draw_mesh(mesh)
-    if flags['draw_vertices']:
-        draw_vertices(mesh)
-    if gvars['face_index'] != 0:
-        draw_mesh(mesh)
-    if flags['draw_origin']:
-        draw_origin()
+
+    glEnable(GL_DEPTH_TEST)
+    draw_bb(mesh)
+    draw_mesh2D(mesh)
+    draw_mesh1D(mesh)
+    draw_vertices(mesh)
+    draw_origin()
     draw_label_interface(mesh)
+
     flags['mesh_drawn_since_last_face_index_change'] = True
 
 if __name__ == '__main__':
