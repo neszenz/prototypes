@@ -10,9 +10,10 @@ from pyglet.window import key, mouse
 
 from meshkD import SuperVertex, MeshkD
 from util import *
+import paths
 
 ## config constants  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-INPUT_DIR = 'tmp'
+INPUT_DIR = paths.DIR_TMP
 DEFAULT_X = 1280
 DEFAULT_Y = 720
 ZOOM_DEFAULT = 100

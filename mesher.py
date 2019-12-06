@@ -25,27 +25,31 @@ from OCC.Core.IntCurvesFace import IntCurvesFace_Intersector
 from OCC.Core.TopAbs import TopAbs_ON, TopAbs_IN
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-INPUT_PATH = paths.PATH_SURFFIL
+INPUT_PATH = paths.STEP_SURFFIL
 sampler.NUMBER_OF_SAMPLES = 10
 sampler.INCLUDE_INNER_WIRES = True
 SMALLEST_ANGLE = np.deg2rad(30)
-SIZE_THRESHOLD = 500.0
+SIZE_THRESHOLD = float('inf')
 
-OUTPUT_DIR = 'tmp'
+OUTPUT_DIR = paths.DIR_TMP
 
 ## BEGIN OF CHEW93_SURFACE + = + = + = + = + = + = + = + = + = + = + = + = + = +
 # 1st: builds CDT meeting normal criteria; 2nd: filps edges until surface CDT
-def triangulate(vertices, pslg, wire_meshes):
-    def triangulate_cdt(vertices, pslg):
-        segments, boundary_offset = pslg
+def triangulate(vertices, segment_loops):
+    def triangulate_cdt(vertices, segment_loops):
+        assert len(segment_loops) > 0
         triangles = []
 
         t = shewchuk_triangle.Triangle()
 
+        boundary_offset = len(segment_loops[0])
         points = [(sv.u, sv.v) for sv in vertices]
         markersBoundary = [1] * boundary_offset
         markersInner = [0] * (len(points)-boundary_offset)
         markers = markersBoundary + markersInner
+        segments = []
+        for segment_loop in segment_loops:
+            segments += segment_loop
 
         t.set_points(points, markers=markers)
         t.set_segments(segments)
@@ -57,13 +61,21 @@ def triangulate(vertices, pslg, wire_meshes):
             triangles.append((i0, i1, i2))
 
         return triangles
-    def trim_triangulation(triangles, wire_meshes):
+    def trim_triangulation(triangles, segment_loops):
+        def is_on_segment(i, segment_loop):
+            for segment in segment_loop:
+                if i in segment:
+                    return True
+
+            return False
         t_index = 0
         while t_index < len(triangles):
             i0, i1, i2 = triangles[t_index]
 
-            for inner_wire in wire_meshes[1:]:
-                if i0 in inner_wire and i1 in inner_wire and i2 in inner_wire:
+            for inner_segment_loop in segment_loops[1:]:
+                if is_on_segment(i0, inner_segment_loop) and \
+                   is_on_segment(i1, inner_segment_loop) and \
+                   is_on_segment(i2, inner_segment_loop):
                     del triangles[t_index]
                     t_index -= 1
                     break
@@ -132,8 +144,8 @@ def triangulate(vertices, pslg, wire_meshes):
                 # situation before flip
                 t0 = (tuple(p0), tuple(p1), tuple(p2))
                 t1 = (tuple(p0), tuple(p3), tuple(p1))
-                # assert counter_clockwise(*t0) == True #TODO ran into errors maybe
-                # assert counter_clockwise(*t1) == True #TODO b/o degenerating flips
+                assert counter_clockwise(*t0) == True #TODO ran into errors maybe
+                assert counter_clockwise(*t1) == True #TODO b/o degenerating flips
 
                 # situation after flip
                 t2 = (tuple(p3), tuple(p2), tuple(p0))
@@ -163,17 +175,11 @@ def triangulate(vertices, pslg, wire_meshes):
                 t0 = (p0, p1, p2)
                 t1 = (p0, p3, p1)
                 min_angle_before = min(get_min_face_angle(t0), get_min_face_angle(t1))
-                # assert min_angle_before > 0.0 #TODO restoe
-                if min_angle_before == 0.0:
-                    print('min_angle_before:', min_angle_before)
 
                 # situation after flip
                 t2 = (p3, p2, p0)
                 t3 = (p3, p1, p2)
                 min_angle_after = min(get_min_face_angle(t2), get_min_face_angle(t3))
-                # assert min_angle_after > 0.0 #TODO restoe
-                if min_angle_after == 0.0:
-                    print('min_angle_after:', min_angle_after)
 
                 return min_angle_after > min_angle_before
             for eh in omesh.edges():
@@ -219,8 +225,9 @@ def triangulate(vertices, pslg, wire_meshes):
         scdt_triangles = triangles_from_omesh(omesh)
 
         return scdt_triangles
-    triangles = triangulate_cdt(vertices, pslg)
-    trim_triangulation(triangles, wire_meshes)
+
+    triangles = triangulate_cdt(vertices, segment_loops)
+    trim_triangulation(triangles, segment_loops)
 
     #TODO check/ enforce face-normal-criteria
 
@@ -306,28 +313,45 @@ def calculate_surface_circumcenter(scdt, delta_index):
         cc = calculate_circumcenter(scdt, delta_index)
         n = normalize(np.cross(b-a, c-a))
 
-        return gp_Lin(gp_Pnt(cc[0], cc[1], cc[2]), gp_Dir(n[0], n[1], n[2]))
+        return cc, gp_Lin(gp_Pnt(cc[0], cc[1], cc[2]), gp_Dir(n[0], n[1], n[2]))
+    def array_from_pnt(pnt):
+        return np.array((pnt.X(), pnt.Y(), pnt.Z()))
     vertices, _, triangles = scdt
     face = vertices[triangles[delta_index][0]].face
 
-    center_line = calculate_center_line(scdt, delta_index)
+    cc, center_line = calculate_center_line(scdt, delta_index)
     intersector = IntCurvesFace_Intersector(face, 0.0001)
     intersector.Perform(center_line, -float('inf'), float('inf'))
     if intersector.IsDone():
-        if intersector.NbPnt() == 1:
+        if intersector.NbPnt() < 1:
+            return None
+        elif intersector.NbPnt() == 1:
             pnt = intersector.Pnt(1)
             assert intersector.State(1) == TopAbs_IN
+
             scc = np.array((pnt.X(), pnt.Y(), pnt.Z()))
+
             return scc
-        elif intersector.NbPnt() < 1:
-            return None
         else:
-            raise Exception('calculate_surface_circumcenter() error - multiple intersections')
+            points = [array_from_pnt(intersector.Pnt(i+1)) for i in range(intersector.NbPnt())]
+
+            closest_index = 0
+            closest_dist = np.linalg.norm(points[closest_index] - cc)
+
+            for p_index in range(1, len(points)):
+                p = points[p_index]
+                current_dist = np.linalg.norm(p - cc)
+
+                if current_dist < closest_dist:
+                    closest_index = p_index
+                    closest_dist = current_dist
+
+            return points[closest_index]
     else:
         raise Exception('calculate_surface_circumcenter() error - intersector not done')
 
 def longest_edge_vertex_indices(scdt, delta_index): #TODO check whether this works correctly
-    vertices, pslg, triangles = scdt
+    vertices, _, triangles = scdt
     i0, i1, i2 = triangles[delta_index]
     p0 = vertices[i0].XYZ_vec3()
     p1 = vertices[i1].XYZ_vec3()
@@ -357,53 +381,74 @@ def longest_edge_vertex_indices(scdt, delta_index): #TODO check whether this wor
 #TODO check for guaranteed termination
 #TODO avoid problem regions? (p.40)
 def segment_index_of_longest_edge(scdt, edge_vertex_indices):
-    _, pslg, _ = scdt
-    segments, boundary_offset = pslg
+    _, segment_loops, _ = scdt
     ev0, ev1 = edge_vertex_indices
 
-    for s_index in range(len(segments)):
-        s0, s1 = segments[s_index]
-        if (ev0 == s0 and ev1 == s1) or\
-           (ev0 == s1 and ev1 == s0):
-            return s_index
+    for l_index in range(len(segment_loops)):
+        segment_loop = segment_loops[l_index]
+        for s_index in range(len(segment_loop)):
+            s0, s1 = segment_loop[s_index]
+            if (ev0 == s0 and ev1 == s1) or\
+               (ev0 == s1 and ev1 == s0):
+                return l_index, s_index
 
-    return -1
+    return None
 
-def halfway_of_longest_edge(scdt, edge_vertex_indices):
-    vertices, pslg, _ = scdt
-    segments, boundary_offset = pslg
+def insert_halfway_vertex_of_edge(scdt, edge_vertex_indices):
+    vertices, _, _ = scdt
+    assert len(vertices) > 0
+
     ev0, ev1 = edge_vertex_indices
+    sv0 = vertices[ev0]
+    sv1 = vertices[ev1]
 
-    p0 = vertices[ev0].UV_vec2()
-    p1 = vertices[ev1].UV_vec2()
-    hw = p0 + (p1-p0)/2
+    p0 = sv0.UV_vec2()
+    p1 = sv1.UV_vec2()
+    p01 = p1 - p0
+    hw = p0 + (p01/2)
 
-    tmp_sv = SuperVertex(u=hw[0], v=hw[1])
-    tmp_sv.face = vertices[ev0].face
-    tmp_sv.project_to_XYZ()
+    svhw = SuperVertex(u=hw[0], v=hw[1])
+    svhw.face = sv0.face
+    svhw.face_id = sv0.face_id
+    svhw.project_to_XYZ()
 
-    return tmp_sv.XYZ_vec3()
+    vertices.append(svhw)
+
+    return
 
 def split_segment(scdt, segment_index):
-    vertices, pslg, _ = scdt
-    segments, boundary_offset = pslg
-    vi0, vi1 = segments[segment_index]
+    def count_segments(segment_loops):
+        nos = 0
+
+        for segment_loop in segment_loops:
+            nos += len(segment_loop)
+
+        return nos
+    vertices, segment_loops, _ = scdt
+    l_index, s_index = segment_index
+    print('split_segment()')
+    print(segment_index, '->', segment_loops[l_index][s_index])
+
+    segment_loop = segment_loops[l_index]
+    vi0, vi1 = segment_loop[s_index]
 
     # compute and insert halfway vertex
     sv0 = vertices[vi0]
     sv1 = vertices[vi1]
     sv_halfway = SuperVertex.compute_halfway_on_shared_edge(sv0, sv1)
     # segment vertices are never deleted -> insert before inner vertices to avoid index shift
-    hw_index = len(segments) # == num of segment vertices
+    hw_index = count_segments(segment_loops) # == num of boundary vertices
     vertices.insert(hw_index, sv_halfway)
-    print('inserted', str(sv_halfway), 'at', hw_index)
 
     # delete old and insert new segments
-    del segments[segment_index]
+    print('del', segment_loop[s_index])
+    del segment_loop[s_index]
     new_s0 = (vi0, hw_index)
     new_s1 = (hw_index, vi1)
-    segments.insert(segment_index, new_s1)
-    segments.insert(segment_index, new_s0)
+    print('insert', new_s1)
+    print('insert', new_s0)
+    segment_loop.insert(s_index, new_s1)
+    segment_loop.insert(s_index, new_s0)
 
     # delete encroaching vertices
     new_segments_length = np.linalg.norm(sv0.XYZ_vec3() - sv_halfway.XYZ_vec3())
@@ -414,15 +459,11 @@ def split_segment(scdt, segment_index):
         dist_to_hw = np.linalg.norm(sv.XYZ_vec3() - sv_halfway.XYZ_vec3())
 
         if dist_to_hw < new_segments_length:
-            print('delete', sv_index)
             del vertices[sv_index]
         else:
             sv_index += 1
 
-    if segment_index < boundary_offset:
-        boundary_offset += 1
-
-    return boundary_offset
+    return
 
 def insert_inner_vertex(scdt, c):
     vertices, _, _ = scdt
@@ -438,12 +479,8 @@ def insert_inner_vertex(scdt, c):
     return
 
 def chew93_Surface(vertices, wire_meshes):
-    def pslg_from_wires(vertices, wire_meshes):
-        segments = []
-        boundary_offset = 0
-
-        if len(wire_meshes) > 0:
-            boundary_offset = len(wire_meshes[0])
+    def segments_from_wires(vertices, wire_meshes):
+        segment_loops = []
 
         for wire_index in range(len(wire_meshes)):
             wire_mesh = wire_meshes[wire_index]
@@ -454,19 +491,17 @@ def chew93_Surface(vertices, wire_meshes):
                 i1 = wire_mesh[(i+1) % len(wire_mesh)]
 
                 if wire_index == 0:
-                    assert max(i0, i1) < boundary_offset
                     wire_segments.append((i0, i1)) # keep ccw order
                 else:
                     wire_segments.insert(0, (i1, i0)) # change cw to ccw for pytriangle
 
-            segments += wire_segments
+            segment_loops.append(wire_segments)
 
-        return segments, boundary_offset
+        return segment_loops
     # step 1: initial surface Delaunay triangulation
-    segments, boundary_offset = pslg_from_wires(vertices, wire_meshes)
-    pslg = segments, boundary_offset
-    triangles = triangulate(vertices, pslg, wire_meshes)
-    scdt = vertices, pslg, triangles
+    segment_loops = segments_from_wires(vertices, wire_meshes)
+    triangles = triangulate(vertices, segment_loops)
+    scdt = vertices, segment_loops, triangles
 
     # step 2+3: find largest triangle that fails shape ans size criteria
     delta_index = find_largest_failing_triangle(scdt)
@@ -494,21 +529,19 @@ def chew93_Surface(vertices, wire_meshes):
             edge_vertex_indices = longest_edge_vertex_indices(scdt, delta_index)
             s_index = segment_index_of_longest_edge(scdt, edge_vertex_indices)
 
-            if s_index >= 0:
-                # step 6: split segment; remove encroaching inner vertices
-                boundary_offset = split_segment(scdt, s_index)
-                pslg = segments, boundary_offset
-            else:
+            if s_index is None:
                 # custom step for 'no intersection, no segment' case
-                hw = halfway_of_longest_edge(scdt, edge_vertex_indices)
-                insert_inner_vertex(scdt, hw)
+                insert_halfway_vertex_of_edge(scdt, edge_vertex_indices)
+            else:
+                # step 6: split segment; remove encroaching inner vertices
+                split_segment(scdt, s_index)
         else:
             # step 5: no segment was hit; insert c
             insert_inner_vertex(scdt, c)
 
         # update for next loop
-        triangles = triangulate(vertices, pslg, wire_meshes)
-        scdt = vertices, pslg, triangles
+        triangles = triangulate(vertices, segment_loops)
+        scdt = vertices, segment_loops, triangles
         delta_index = find_largest_failing_triangle(scdt)
 
     return triangles
@@ -528,10 +561,9 @@ def mesher(path, write_mesh1D=True):
     simple_sampler = sampler.factory(sampler.SAMPLER_TYPE.SIMPLE)
     mesh = simple_sampler(INPUT_PATH)
 
-    # print('>> mesh samples w/ chew93_2D')
     print('>> mesh samples with chew93_Surface')
     calculate_triangulation(mesh)
-    # mesh.reset_bounding_boxes()
+    mesh.reset_bounding_boxes()
 
     return mesh
 
@@ -542,7 +574,8 @@ def write_mesh_to_file(mesh2D):
         path = os.path.join(OUTPUT_DIR, name)
 
         if os.path.exists(path):
-            raise Exception('output file name already exists:', path)
+            name = timestamp.strftime('%y%m%d_%H%M%S%f') + MeshkD.FILE_EXTENSION
+            path = os.path.join(OUTPUT_DIR, name)
 
         assert not os.path.exists(path)
 

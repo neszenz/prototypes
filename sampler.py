@@ -26,7 +26,7 @@ import paths
 from meshkD import SuperVertex, MeshkD
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-INPUT_PATH = paths.PATH_BOX
+INPUT_PATH = paths.STEP_BOX
 
 class SAMPLER_TYPE: # enum for calling sampler factory
     SIMPLE = 0
@@ -36,7 +36,7 @@ class SAMPLER_TYPE: # enum for calling sampler factory
         NORMALIZED:'NORMALIZED'
     }
 
-OUTPUT_DIR = 'tmp'
+OUTPUT_DIR = paths.DIR_TMP
 # to make written file names unique, a timestamp prefix is used
 TIMESTAMP = datetime.datetime.now()
 OUTPUT_PREFIX = TIMESTAMP.strftime('%y%m%d_%H%M%S')
