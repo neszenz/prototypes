@@ -50,7 +50,8 @@ gvars = {
     'zoom' : ZOOM_DEFAULT,
     'rotation' : np.array([0.0, 0.0, 0.0]),
     'tilt' : TILT_DEFAULT,
-    'drag' : np.array([0.0, 0.0, 0.0])
+    'drag' : np.array([0.0, 0.0, 0.0]),
+    'phong_buffer' : {}
 }
 
 def num_of_faces_from_current_mesh():
@@ -72,6 +73,7 @@ def load_meshes_from_files():
 
     gvars['mesh_index'] = min(gvars['mesh_index'], max(len(meshes)-1, 0))
     gvars['face_index'] = min(gvars['face_index'], num_of_faces_from_current_mesh())
+    gvars['phong_buffer'].clear()
 
 def set_projection(width):
     w = width
@@ -145,6 +147,7 @@ def on_key_press(symbol, modifiers):
         global gvars, meshes
         if gvars['mesh_index']+value >= 0 and gvars['mesh_index']+value < len(meshes):
             gvars['mesh_index']+= value
+            gvars['phong_buffer'].clear()
         gvars['face_index'] = min(gvars['face_index'], num_of_faces_from_current_mesh())
     global flags, gvars
     if modifiers == 0:
@@ -329,27 +332,41 @@ def on_draw():
             draw_face(mesh.face_meshes[face_index])
     def draw_mesh2D(mesh):
         def draw_face(face_mesh):
-            def draw_triangle(sv0, sv1, sv2):
-                def phong(v0, v1, v2):
-                    N = calculate_normal_normalized(v0, v1, v2)
-                    if np.linalg.norm(N) == 0.0:
-                        return COLOR_WIREFRAME
+            def draw_triangle(sv0, sv1, sv2, t_key):
+                def phong(v0, v1, v2, t_key):
+                    def buffered_phong(v0, v1, v2, t_key):
+                        if t_key in gvars['phong_buffer']:
+                            return gvars['phong_buffer'][t_key]
 
-                    Iambi = np.abs(N)
+                        N = calculate_normal_normalized(v0, v1, v2)
+
+                        Iambi = np.abs(N)
+
+                        L = normalize(np.array((1.0, 1.0, 1.0)))
+                        NL = np.dot(N, L)
+                        if NL > 0.0:
+                            R = normalize(2.0 * (N * NL) - L)
+                        else:
+                            R = np.array((0.0, 0.0, 0.0))
+
+                        if NL > 0.0:
+                            Idiff = np.abs(N) * NL
+                        else:
+                            Idiff = np.array((0.0, 0.0, 0.0))
+
+                        gvars['phong_buffer'][t_key] = R, Iambi, Idiff
+
+                        return R, Iambi, Idiff
+                    R, Iambi, Idiff = buffered_phong(v0, v1, v2, t_key)
+
                     if flags['draw_2d_mode']:
                         return Iambi
 
-                    L = normalize(np.array((1.0, 1.0, 1.0)))
-                    NL = np.dot(N, L)
-                    if NL > 0.0:
-                        R = normalize(2.0 * (N * NL) - L)
-                    else:
-                        R = np.array((0.0, 0.0, 0.0))
+                    ambi_factor = 0.6
+                    Iambi_Idiff = ambi_factor*Iambi + (1.0-ambi_factor)*Idiff
 
-                    if NL > 0.0:
-                        Idiff = np.abs(N) * NL
-                    else:
-                        Idiff = np.array((0.0, 0.0, 0.0))
+                    if gvars['face_index'] == 0:
+                        return Iambi_Idiff
 
                     E = normalize(gvars['dof'])
                     theta = np.dot(R, E)
@@ -358,7 +375,7 @@ def on_draw():
                     else:
                         Ispec = np.array((0.0, 0.0, 0.0))
 
-                    return 0.6*Iambi + 0.4*Idiff + 0.3*Ispec
+                    return Iambi_Idiff + 0.3*Ispec
                 if flags['draw_2d_mode']:
                     v0 = sv0.UV_vec3()
                     v1 = sv1.UV_vec3()
@@ -371,7 +388,7 @@ def on_draw():
                 if not flags['flat_shading']:
                     color = COLOR_WIREFRAME
                 else:
-                    color = phong(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+                    color = phong(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3(), t_key)
                 glColor3f(*color)
 
                 glVertex3f(v0[0], v0[1], v0[2])
@@ -388,9 +405,10 @@ def on_draw():
 
             glBegin(GL_TRIANGLES)
 
-            for triangle in triangles:
-                i0, i1, i2 = triangle
-                draw_triangle(vertices[i0], vertices[i1], vertices[i2])
+            for t_index in range(len(triangles)):
+                i0, i1, i2 = triangles[t_index]
+                t_key = (vertices[0].face_id, t_index)
+                draw_triangle(vertices[i0], vertices[i1], vertices[i2], t_key)
 
             glEnd()
 

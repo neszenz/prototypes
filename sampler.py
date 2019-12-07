@@ -93,7 +93,7 @@ def generate_mesh_framework(compound, shape_maps):
     for face in ex.faces():
         if cnt != 1: #TODO used for testing
             cnt += 1 #TODO used for testing
-            continue #TODO used for testing
+            # continue #TODO used for testing
         face_framework = generate_face_framework(face, shape_maps)
         model_framework.append(face_framework)
         cnt += 1 #TODO used for testing
