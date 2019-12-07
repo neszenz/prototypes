@@ -13,6 +13,9 @@ face_meshes: list of face meshes
 bounding_box2D: for uv coordinates and negative face_id as w
 bounding_box3D: for xyz coordinates
 """
+import datetime
+import os
+import pickle
 import numpy as np
 
 from OCC.Core.BRep import BRep_Tool
@@ -202,3 +205,22 @@ class MeshkD:
         x_min, x_max, y_min, y_max, z_min, z_max = self.bounding_box3D
         cog = np.array((x_max-x_min, y_max-y_min, z_max-z_min)) / 2
         return np.array((x_min, y_min, z_min)) + cog
+
+## I/O + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
+def write_to_file(meshkD, output_dir):
+    timestamp = datetime.datetime.now()
+    name = timestamp.strftime('%y%m%d_%H%M%S') + MeshkD.FILE_EXTENSION
+    path = os.path.join(output_dir, name)
+
+    if os.path.exists(path):
+        name = timestamp.strftime('%y%m%d_%H%M%S%f') + MeshkD.FILE_EXTENSION
+        path = os.path.join(output_dir, name)
+    assert not os.path.exists(path)
+
+    print('>> write to file \"', path, '\"', sep='')
+    os.makedirs(output_dir, exist_ok=True)
+    pickle.dump(meshkD, open(path, 'wb'))
+
+    return
+def load_from_file(path):
+    return pickle.load(open(path, 'rb'))

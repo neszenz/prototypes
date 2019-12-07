@@ -1,14 +1,11 @@
-import os
 import numpy as np
 import pathlib
-import pickle
-import sys
 
 import pyglet
 from pyglet.gl import *
 from pyglet.window import key, mouse
 
-from meshkD import SuperVertex, MeshkD
+from meshkD import SuperVertex, MeshkD, load_from_file
 from util import *
 import paths
 
@@ -65,14 +62,15 @@ def load_meshes_from_files():
     global meshes
     meshes.clear()
 
-    filepaths = pathlib.Path(INPUT_DIR).rglob('*'+MeshkD.FILE_EXTENSION)
+    paths = pathlib.Path(INPUT_DIR).rglob('*'+MeshkD.FILE_EXTENSION)
 
-    for filepath in sorted(filepaths, reverse=True):
-        mesh = pickle.load(open(filepath, 'rb'))
-        mesh.name = str(filepath) + ' from ' + mesh.name
+    for path in sorted(paths, reverse=True):
+        mesh = load_from_file(path)
+        mesh.name = str(path) + ' from ' + mesh.name
 
         meshes.append(mesh)
 
+    gvars['mesh_index'] = min(gvars['mesh_index'], max(len(meshes)-1, 0))
     gvars['face_index'] = min(gvars['face_index'], num_of_faces_from_current_mesh())
 
 def set_projection(width):
@@ -480,7 +478,8 @@ def on_draw():
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
         set_projection(window.width)
-        draw_label(0, 'mesh '+str(-1*gvars['mesh_index'])+' ('+mesh.name+')')
+        sign = '-' if gvars['mesh_index'] > 0 else ' '
+        draw_label(0, 'mesh '+sign+str(gvars['mesh_index'])+' ('+mesh.name+')')
         if gvars['face_index'] == 0:
             draw_label(1, 'draw all faces')
         else:

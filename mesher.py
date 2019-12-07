@@ -7,17 +7,14 @@ To gain a foundation for the meshing process, sampler.py is used to generate a
 first step is to compute constrained Delaunay Triangulations w/ pytriangle and
 then apply my implementation of Chew's Surface Delaunay Refinement algorithm.
 """
-import datetime
 from gerobust.predicates import clockwise, counter_clockwise
 import numpy as np
-import os
-import pickle
 import triangle as shewchuk_triangle
 import openmesh
 
 import paths
 import sampler
-from meshkD import SuperVertex, MeshkD
+from meshkD import SuperVertex, MeshkD, write_to_file
 from util import *
 
 from OCC.Core.gp import gp_Pnt, gp_Dir, gp_Lin
@@ -25,12 +22,13 @@ from OCC.Core.IntCurvesFace import IntCurvesFace_Intersector
 from OCC.Core.TopAbs import TopAbs_ON, TopAbs_IN
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-INPUT_PATH = paths.STEP_SURFFIL
 sampler.NUMBER_OF_SAMPLES = 10
 sampler.INCLUDE_INNER_WIRES = True
 SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = float('inf')
 
+# __main__ config
+INPUT_PATH = paths.STEP_CYLINDER
 OUTPUT_DIR = paths.DIR_TMP
 
 ## BEGIN OF CHEW93_SURFACE + = + = + = + = + = + = + = + = + = + = + = + = + = +
@@ -516,6 +514,8 @@ def chew93_Surface(vertices, wire_meshes):
 
     iteration_counter = 0
     while delta_index >= 0:
+        if iteration_counter >= 50:
+            break
         print('iteration', iteration_counter)
         iteration_counter += 1
         # step 4: travel across the from any of delta's corners to c
@@ -547,7 +547,10 @@ def chew93_Surface(vertices, wire_meshes):
     return triangles
 ## END OF CHEW93_SURFACE = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 
-def calculate_triangulation(mesh):
+def mesher(path):
+    mesh = sampler.sample(path)
+
+    print('>> mesh samples with chew93_Surface')
     for face_index in range(mesh.number_of_faces()):
         print('face', face_index+1, 'of', mesh.number_of_faces(), '. . .')
         vertices, wire_meshes, triangles, _ = mesh.face_meshes[face_index]
@@ -555,38 +558,9 @@ def calculate_triangulation(mesh):
         triangles.clear()
         triangles += chew93_Surface(vertices, wire_meshes)
 
-    return
-
-def mesher(path, write_mesh1D=True):
-    simple_sampler = sampler.factory(sampler.SAMPLER_TYPE.SIMPLE)
-    mesh = simple_sampler(INPUT_PATH)
-
-    print('>> mesh samples with chew93_Surface')
-    calculate_triangulation(mesh)
     mesh.reset_bounding_boxes()
 
     return mesh
-
-def write_mesh_to_file(mesh2D):
-    def generate_output_file_path():
-        timestamp = datetime.datetime.now()
-        name = timestamp.strftime('%y%m%d_%H%M%S') + MeshkD.FILE_EXTENSION
-        path = os.path.join(OUTPUT_DIR, name)
-
-        if os.path.exists(path):
-            name = timestamp.strftime('%y%m%d_%H%M%S%f') + MeshkD.FILE_EXTENSION
-            path = os.path.join(OUTPUT_DIR, name)
-
-        assert not os.path.exists(path)
-
-        return path
-    path = generate_output_file_path()
-
-    print('>> write to file \"', path, '\"', sep='')
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    pickle.dump(mesh2D, open(path, 'wb'))
-
-    return
 
 if __name__ == '__main__':
     TMP = False
@@ -594,5 +568,5 @@ if __name__ == '__main__':
         TMP2 = i
         print(TMP2)
         mesh = mesher(INPUT_PATH)
-        write_mesh_to_file(mesh)
+        write_to_file(mesh, OUTPUT_DIR)
         TMP = False

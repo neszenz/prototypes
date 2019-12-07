@@ -7,10 +7,7 @@ model face boundaries in a step model are circular. Outer boundaries are
 oriented counterclockwise and inner ones clockwise.
 This leads to the representation as described in meshkD.py.
 """
-import datetime
 import numpy as np
-import os
-import pickle
 
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Curve2d, BRepAdaptor_Surface
@@ -23,28 +20,23 @@ from OCC.Extend.DataExchange import read_step_file, write_step_file
 from OCC.Extend.TopologyUtils import TopologyExplorer
 
 import paths
-from meshkD import SuperVertex, MeshkD
+from meshkD import SuperVertex, MeshkD, write_to_file
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-INPUT_PATH = paths.STEP_BOX
-
-class SAMPLER_TYPE: # enum for calling sampler factory
+class SAMPLER_TYPES: # enum for calling sampler factory
     SIMPLE = 0
-    NORMALIZED = 1
     string_dict = {
         SIMPLE:'SIMPLE',
-        NORMALIZED:'NORMALIZED'
     }
 
-OUTPUT_DIR = paths.DIR_TMP
-# to make written file names unique, a timestamp prefix is used
-TIMESTAMP = datetime.datetime.now()
-OUTPUT_PREFIX = TIMESTAMP.strftime('%y%m%d_%H%M%S')
-
+SAMPLER_TYPE = SAMPLER_TYPES.SIMPLE
 NUMBER_OF_SAMPLES = 10 # only for SIMPLE sampling method
 INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
-SIMPLIFY_VERTEX_LIST = False # removes doubly vertices (cylinders); big performance impact
+
+# __main__ config
+INPUT_PATH = paths.STEP_42
+OUTPUT_DIR = paths.DIR_TMP
 
 ## functions = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 def generate_shape_maps(compound):
@@ -101,7 +93,7 @@ def generate_mesh_framework(compound, shape_maps):
     for face in ex.faces():
         if cnt != 1: #TODO used for testing
             cnt += 1 #TODO used for testing
-            # continue #TODO used for testing
+            continue #TODO used for testing
         face_framework = generate_face_framework(face, shape_maps)
         model_framework.append(face_framework)
         cnt += 1 #TODO used for testing
@@ -133,8 +125,8 @@ def edge_sampler_simple(edge_info, face, shape_maps):
     if edge.Orientation() != wire.Orientation(): # corrects ori to keep edges consistent in wire
         edge_mesh.reverse()
     return edge_mesh
-def sample_edges_in_framework(framework, shape_maps, sampler_type):
-    def add_wire(face_mesh, wire_framework, shape_maps, sampler_type):
+def sample_edges_in_framework(framework, shape_maps):
+    def add_wire(face_mesh, wire_framework, shape_maps):
         vertices, wire_meshes, _, face = face_mesh
 
         wire_vertices = []
@@ -144,7 +136,7 @@ def sample_edges_in_framework(framework, shape_maps, sampler_type):
 
         # collect all edge meshes
         for edge_info in wire_framework:
-            if sampler_type == SAMPLER_TYPE.SIMPLE:
+            if SAMPLER_TYPE == SAMPLER_TYPES.SIMPLE:
                 edge_mesh = edge_sampler_simple(edge_info, face, shape_maps)
             else:
                 pass #TODO different sampler methods
@@ -200,7 +192,7 @@ def sample_edges_in_framework(framework, shape_maps, sampler_type):
         face_mesh = (vertices, wire_meshes, [], face)
 
         for wire_framework in wire_frameworks:
-            add_wire(face_mesh, wire_framework, shape_maps, sampler_type)
+            add_wire(face_mesh, wire_framework, shape_maps)
 
         if face.Orientation() == TopAbs_REVERSED:
             reverse_u_of_all_vertices(face_mesh)
@@ -209,22 +201,19 @@ def sample_edges_in_framework(framework, shape_maps, sampler_type):
 
     return face_meshes
 
-def factory(sampler_type):
-    if sampler_type in SAMPLER_TYPE.string_dict:
-        print('>> creating sampler of type', SAMPLER_TYPE.string_dict[sampler_type])
-    else:
-        raise Exception('factory() error - unknown sampler type')
-    def sampler(path):
-        print('>> loading step file \'', path, '\'', sep='')
-        compound = read_step_file(path, verbosity=False)
-        shape_maps = generate_shape_maps(compound)
-        print('>> generating framework and sampling...')
-        framework = generate_mesh_framework(compound, shape_maps)
-        face_meshes = sample_edges_in_framework(framework, shape_maps, sampler_type)
-        return MeshkD(path, face_meshes)
-    return sampler
+def sample(path):
+    print('>> start sampler of type', SAMPLER_TYPES.string_dict[SAMPLER_TYPE])
+    print('>> loading step file \'', path, '\'', sep='')
+    compound = read_step_file(path, verbosity=False)
+    shape_maps = generate_shape_maps(compound)
 
-def noDoublyLoopInsertions(mesh1D):
+    print('>> generating framework and sampling...')
+    framework = generate_mesh_framework(compound, shape_maps)
+    face_meshes = sample_edges_in_framework(framework, shape_maps)
+
+    return MeshkD(path, face_meshes)
+
+def noDoublyLoopInsertions(mesh):
     def checkWire(vertices, wire_mesh):
         ok = True
         for i in range(0, len(wire_mesh)):
@@ -240,9 +229,9 @@ def noDoublyLoopInsertions(mesh1D):
         return ok
     ok = True
 
-    for i in range(mesh1D.number_of_faces()):
+    for i in range(mesh.number_of_faces()):
         print('face', i)
-        vertices, wire_meshes, _, _ = mesh1D.face_meshes[i]
+        vertices, wire_meshes, _, _ = mesh.face_meshes[i]
 
         for wire_mesh in wire_meshes:
             if not checkWire(vertices, wire_mesh):
@@ -250,21 +239,7 @@ def noDoublyLoopInsertions(mesh1D):
 
     return ok
 
-def write_mesh_to_file(mesh1D):
-    def generate_output_file_path():
-        name = OUTPUT_PREFIX + MeshkD.FILE_EXTENSION
-        path = os.path.join(OUTPUT_DIR, name)
-        if os.path.exists(path):
-            raise Exception('output file name already exists:', path)
-        assert not os.path.exists(path)
-        return path
-    path = generate_output_file_path()
-    print('>> write to file \"', path, '\"', sep='')
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    pickle.dump(mesh1D, open(path, 'wb'))
-
 if __name__ == '__main__':
-    sampler = factory(SAMPLER_TYPE.SIMPLE)
-    mesh1D = sampler(INPUT_PATH)
-    print('no doubly vertices per loop:', noDoublyLoopInsertions(mesh1D))
-    write_mesh_to_file(mesh1D)
+    mesh = sample(INPUT_PATH)
+    print('no doubly vertices per loop:', noDoublyLoopInsertions(mesh))
+    write_to_file(mesh, OUTPUT_DIR)
