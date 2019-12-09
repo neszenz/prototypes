@@ -11,6 +11,7 @@ import numpy as np
 
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Curve2d, BRepAdaptor_Surface
+from OCC.Core.gp import gp_Pnt, gp_Vec
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from OCC.Core.ShapeAnalysis import shapeanalysis
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FORWARD, TopAbs_REVERSED
@@ -33,6 +34,8 @@ SAMPLER_TYPE = SAMPLER_TYPES.SIMPLE
 NUMBER_OF_SAMPLES = 10 # only for SIMPLE sampling method
 INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
+REMOVE_SINGULARITIES = True
+SIMPLIFY_LINEAR_SEGMENTS = False
 
 # __main__ config
 INPUT_PATH = paths.STEP_42
@@ -100,30 +103,95 @@ def generate_mesh_framework(compound, shape_maps):
     return model_framework
 
 def edge_sampler_simple(edge_info, face, shape_maps):
+    def collect_interface(edge, face):
+        surface = BRepAdaptor_Surface(face)
+        curve2d = BRepAdaptor_Curve2d(edge, face)
+        curve3d = BRepAdaptor_Curve(edge)
+
+        fp = curve2d.FirstParameter()
+        lp = curve2d.LastParameter()
+        assert fp == curve3d.FirstParameter()
+        assert lp == curve3d.LastParameter()
+        p_length = lp - fp
+
+        return surface, curve2d, curve3d, fp, lp, p_length
+    def sample_derivative(curve3d, parameter):
+        _ = gp_Pnt()
+        d1 = gp_Vec()
+        curve3d.D1(parameter, _, d1)
+
+        return np.array((d1.X(), d1.Y(), d1.Z()))
+    def sample_supervertex(surface, curve2d, parameter):
+        p2d = curve2d.Value(parameter)
+        p3d = surface.Value(p2d.X(), p2d.Y())
+
+        sv = SuperVertex(x=p3d.X(), y=p3d.Y(), z=p3d.Z(), u=p2d.X(), v=p2d.Y())
+
+        return sv
+    def remove_singularities(edge_mesh):
+        sv_index = 1
+        while sv_index < len(edge_mesh):
+            sv_last = edge_mesh[sv_index-1]
+            sv_curr = edge_mesh[sv_index]
+
+            if np.allclose(sv_last.XYZ_vec3(), sv_curr.XYZ_vec3()):
+                del edge_mesh[sv_index]
+            else:
+                sv_index += 1
+
+        return
+    def simplify_linear_segments(edge_mesh, derivatives):
+        assert len(edge_mesh) == len(derivatives)
+
+        i = 1
+        while i+1 < len(edge_mesh):
+            d_last = derivatives[i-1]
+            d_curr = derivatives[i]
+            d_next = derivatives[i+1]
+
+            if np.allclose(d_last, d_curr) and np.allclose(d_curr, d_next):
+                del edge_mesh[i]
+                del derivatives[i]
+            else:
+                i += 1
+
+        return
     wire, edge = edge_info
     face_map, _, _ = shape_maps
+
     edge_mesh = []
+    derivatives = []
+
     if NUMBER_OF_SAMPLES < 2:
         return edge_mesh
-    surface = BRepAdaptor_Surface(face)
-    curve, fp, lp = BRep_Tool.CurveOnSurface(edge, face)
-    curve = BRepAdaptor_Curve2d(edge, face) # should be the same, but for consistency w/ rest of code
-    p_length = lp - fp
+
+    surface, curve2d, curve3d, fp, lp, p_length = collect_interface(edge, face)
+
     for i in range(0, NUMBER_OF_SAMPLES):
         if i == NUMBER_OF_SAMPLES-1:
             parameter = lp
         else:
             parameter = fp + i*(p_length / (NUMBER_OF_SAMPLES-1))
-        p2d = curve.Value(parameter)
-        p3d = surface.Value(p2d.X(), p2d.Y())
-        sv = SuperVertex(x=p3d.X(), y=p3d.Y(), z=p3d.Z(), u=p2d.X(), v=p2d.Y())
+
+        d1 = sample_derivative(curve3d, parameter)
+        derivatives.append(d1)
+
+        sv = sample_supervertex(surface, curve2d, parameter)
         sv.face_id = face_map.FindIndex(face)
         sv.face = face
         sv.edges_with_p = [(edge, parameter)]
         edge_mesh.append(sv)
+
+    if REMOVE_SINGULARITIES:
+        remove_singularities(edge_mesh)
+
+    if SIMPLIFY_LINEAR_SEGMENTS:
+        simplify_linear_segments(edge_mesh, derivatives)
+
     # here, the edges orientation are made consistent with that of the wire
     if edge.Orientation() != wire.Orientation(): # corrects ori to keep edges consistent in wire
         edge_mesh.reverse()
+
     return edge_mesh
 def sample_edges_in_framework(framework, shape_maps):
     def add_wire(face_mesh, wire_framework, shape_maps):
@@ -141,13 +209,14 @@ def sample_edges_in_framework(framework, shape_maps):
             else:
                 pass #TODO different sampler methods
 
-            edge_mesh_loop.append(edge_mesh)
+            if len(edge_mesh) >= 2:
+                edge_mesh_loop.append(edge_mesh)
 
         # merge edge meshes together into a wire vertex loop
         for i in range(len(edge_mesh_loop)):
             curr_em = edge_mesh_loop[i]
             next_em = edge_mesh_loop[(i+1) % len(edge_mesh_loop)]
-            if curr_em[-1] == next_em[0]:
+            if np.allclose(curr_em[-1].XYZ_vec3(), next_em[0].XYZ_vec3()):
                 assert not curr_em[-1].edges_with_p is None
                 assert not next_em[0].edges_with_p is None
                 assert len(curr_em[-1].edges_with_p) == 1
