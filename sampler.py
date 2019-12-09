@@ -292,14 +292,14 @@ def noDoublyLoopInsertions(mesh):
                 j_index = wire_mesh[j]
                 svj = vertices[j_index]
                 if svi == svj:
-                    print('vertex', svi, 'occures both at', i, 'and', j, end='')
-                    print(' (i_index:', i_index, ', j_index:', j_index, ')', sep='')
+                    # print('vertex', svi, 'occures both at', i, 'and', j, end='')
+                    # print(' (i_index:', i_index, ', j_index:', j_index, ')', sep='')
                     ok = False
         return ok
     ok = True
 
     for i in range(mesh.number_of_faces()):
-        print('face', i)
+        # print('face', i)
         vertices, wire_meshes, _, _ = mesh.face_meshes[i]
 
         for wire_mesh in wire_meshes:

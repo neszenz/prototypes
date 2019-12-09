@@ -38,6 +38,7 @@ flags = {
     'draw_mesh1D' : True,
     'draw_mesh2D' : True,
     'flat_shading' : False,
+    'cull_faces' : True,
     'draw_2d_mode' : False,
     'draw_origin' : False,
     'arrow_mode' : False, # draw lines as arrows; only in individual face mode
@@ -161,6 +162,8 @@ def on_key_press(symbol, modifiers):
             flags['arrow_mode'] = not flags['arrow_mode']
         if symbol == key.S:
             flags['flat_shading'] = not flags['flat_shading']
+        if symbol == key.D:
+            flags['cull_faces'] = not flags['cull_faces']
         if symbol == key.F:
             flags['draw_2d_mode'] = not flags['draw_2d_mode']
         if symbol == key.J:
@@ -223,26 +226,35 @@ def on_draw():
         label = pyglet.text.Label(text, font_name='Arial', font_size=font_size,
                                   x=0.0, y=0.0, anchor_x='center', anchor_y='center')
         label.draw()
-    def set_modelview(mesh):
-        global gvars
-        if flags['draw_2d_mode']:
-            size_factor = mesh.get_bb2D_size_factor()
-            center = mesh.get_bb2D_center()
+    def config_opengl(mesh):
+        def set_modelview(mesh):
+            global gvars
+            if flags['draw_2d_mode']:
+                size_factor = mesh.get_bb2D_size_factor()
+                center = mesh.get_bb2D_center()
+            else:
+                size_factor = mesh.get_bb3D_size_factor()
+                center = mesh.get_bb3D_center()
+            scale = SAVE_ZONE_FACTOR * ZOOM_DEFAULT * 1.0/size_factor
+            drag = gvars['drag']
+            glMatrixMode(GL_MODELVIEW)
+            glLoadIdentity()
+            glTranslatef(drag[0], drag[1], drag[2])
+            glScalef(scale, scale, scale)
+            glRotatef(gvars['tilt'], 1.0, 0.0, 0.0)
+            glRotatef(gvars['rotation'][0], 1.0, 0.0, 0.0)
+            glRotatef(gvars['rotation'][1], 0.0, 1.0, 0.0)
+            glRotatef(gvars['rotation'][2], 0.0, 0.0, 1.0)
+            glTranslatef(-center[0], -center[1], -center[2])
+            update_direction_of_flight()
+        set_projection(gvars['zoom'])
+        set_modelview(mesh)
+
+        glEnable(GL_DEPTH_TEST)
+        if flags['cull_faces'] and flags['flat_shading']:
+            glEnable(GL_CULL_FACE)
         else:
-            size_factor = mesh.get_bb3D_size_factor()
-            center = mesh.get_bb3D_center()
-        scale = SAVE_ZONE_FACTOR * ZOOM_DEFAULT * 1.0/size_factor
-        drag = gvars['drag']
-        glMatrixMode(GL_MODELVIEW)
-        glLoadIdentity()
-        glTranslatef(drag[0], drag[1], drag[2])
-        glScalef(scale, scale, scale)
-        glRotatef(gvars['tilt'], 1.0, 0.0, 0.0)
-        glRotatef(gvars['rotation'][0], 1.0, 0.0, 0.0)
-        glRotatef(gvars['rotation'][1], 0.0, 1.0, 0.0)
-        glRotatef(gvars['rotation'][2], 0.0, 0.0, 1.0)
-        glTranslatef(-center[0], -center[1], -center[2])
-        update_direction_of_flight()
+            glDisable(GL_CULL_FACE)
     def draw_bb(mesh):
         if not flags['draw_bounding_box']:
             return
@@ -515,10 +527,8 @@ def on_draw():
         return
     mesh = meshes[gvars['mesh_index']]
 
-    set_projection(gvars['zoom'])
-    set_modelview(mesh)
+    config_opengl(mesh)
 
-    glEnable(GL_DEPTH_TEST)
     draw_bb(mesh)
     draw_mesh2D(mesh)
     draw_mesh1D(mesh)
