@@ -25,10 +25,10 @@ from OCC.Core.TopAbs import TopAbs_ON, TopAbs_IN
 sampler.NUMBER_OF_SAMPLES = 10
 sampler.INCLUDE_INNER_WIRES = True
 SMALLEST_ANGLE = np.deg2rad(30)
-SIZE_THRESHOLD = float('inf')
+SIZE_THRESHOLD = 0.01#float('inf')
 
 # __main__ config
-INPUT_PATH = paths.STEP_SURFFIL
+INPUT_PATH = paths.STEP_SPHERE
 OUTPUT_DIR = paths.DIR_TMP
 
 def triangulate_cdt(face_mesh):
@@ -214,6 +214,78 @@ def flip_until_scdt(omesh, vertices):
 
     return
 
+#TODO cog stub currently
+def find_largest_failing_triangle(omesh):
+    def vertices_of_face_handle(omesh, fh):
+        hh = omesh.halfedge_handle(fh)
+        vh0 = omesh.from_vertex_handle(hh)
+        hh = omesh.next_halfedge_handle(hh)
+        vh1 = omesh.from_vertex_handle(hh)
+        hh = omesh.next_halfedge_handle(hh)
+        vh2 = omesh.from_vertex_handle(hh)
+
+        p0 = omesh.point(vh0)
+        p1 = omesh.point(vh1)
+        p2 = omesh.point(vh2)
+
+        return p0, p1, p2
+    delta = openmesh.FaceHandle(-1)
+    delta_size = float('-inf')
+
+    for fh in omesh.faces():
+        p0, p1, p2 = vertices_of_face_handle(omesh, fh)
+        size = calculate_area(p0, p1, p2)
+        if size < SIZE_THRESHOLD:
+            continue
+        if size > delta_size:
+            delta = fh
+            delta_size = size
+
+    print(fh.idx(), delta_size)
+
+    return delta
+
+def insert_cog(omesh, vertices, delta):
+    hh = omesh.halfedge_handle(delta)
+    vh0 = omesh.from_vertex_handle(hh)
+    hh = omesh.next_halfedge_handle(hh)
+    vh1 = omesh.from_vertex_handle(hh)
+    hh = omesh.next_halfedge_handle(hh)
+    vh2 = omesh.from_vertex_handle(hh)
+
+    p0 = vertices[vh0.idx()].UV_vec2()
+    p1 = vertices[vh1.idx()].UV_vec2()
+    p2 = vertices[vh2.idx()].UV_vec2()
+    cog = (p0+p1+p2) / 3
+
+    sv_cog = SuperVertex(u=cog[0], v=cog[1])
+    sv_cog.face_id = vertices[0].face_id
+    sv_cog.face = vertices[0].face
+    sv_cog.project_to_XYZ()
+    vertices.append(sv_cog)
+
+    vh_cog = omesh.add_vertex(sv_cog.XYZ_vec3())
+    openmesh.TriMesh.split(omesh, delta, vh_cog)
+    omesh.garbage_collection()
+
+    return
+
+def split_segment(omesh, vertices, eh):
+    hh = omesh.halfedge_handle(eh, 0)
+    vh0 = omesh.from_vertex_handle(hh)
+    vh1 = omesh.to_vertex_handle(hh)
+
+    sv0 = vertices[vh0.idx()]
+    sv1 = vertices[vh1.idx()]
+    svhw = SuperVertex.compute_halfway_on_shared_edge(sv0, sv1)
+    vertices.append(svhw)
+
+    vhhw = omesh.add_vertex(svhw.XYZ_vec3())
+    omesh.split_edge(eh, vhhw)
+    omesh.garbage_collection()
+
+    return
+
 def are_consistent(omesh, vertices):
     for vh in omesh.vertices():
         if not all(vertices[vh.idx()].XYZ_vec3() == omesh.point(vh)):
@@ -246,7 +318,20 @@ def chew93_Surface(face_mesh):
     omesh = parse_into_openmesh(face_mesh)
     flip_until_scdt(omesh, vertices)
 
-    #TODO
+    delta = find_largest_failing_triangle(omesh)
+
+    cnt = 0
+    while delta.is_valid():
+        # if cnt >= 0:
+            # break
+        print('iteration', cnt)
+        cnt += 1
+        insert_cog(omesh, vertices, delta)
+
+        #TODO
+
+        flip_until_scdt(omesh, vertices)
+        delta = find_largest_failing_triangle(omesh)
 
     parse_triangles_back(omesh, face_mesh)
 
@@ -266,5 +351,8 @@ def triangulate(path):
     return mesh
 
 if __name__ == '__main__':
-    mesh = triangulate(INPUT_PATH)
-    # write_to_file(mesh, OUTPUT_DIR)
+    TMP2 = False
+    for TMP in range(1):
+        mesh = triangulate(INPUT_PATH)
+        TMP2 = False
+        write_to_file(mesh, OUTPUT_DIR)
