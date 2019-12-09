@@ -126,7 +126,13 @@ class SuperVertex:
     def project_to_XYZ(self):
         assert self.face != None
         surface = BRepAdaptor_Surface(self.face)
-        xyz = surface.Value(self.u, self.v)
+        if self.face.Orientation() == TopAbs_REVERSED:
+            u_tmp = self.u
+            self.reverse_u()
+            xyz = surface.Value(self.u, self.v)
+            self.u = u_tmp
+        else:
+            xyz = surface.Value(self.u, self.v)
         self.x = xyz.X()
         self.y = xyz.Y()
         self.z = xyz.Z()
