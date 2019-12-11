@@ -25,7 +25,7 @@ from OCC.Core.TopAbs import TopAbs_ON, TopAbs_IN
 sampler.NUMBER_OF_SAMPLES = 10
 sampler.INCLUDE_INNER_WIRES = True
 SMALLEST_ANGLE = np.deg2rad(30)
-SIZE_THRESHOLD = 0.01#float('inf')
+SIZE_THRESHOLD = float('inf')
 
 # __main__ config
 INPUT_PATH = paths.STEP_SPHERE
@@ -134,7 +134,7 @@ def flip_until_scdt(omesh, vertices):
             vh3 = omesh.to_vertex_handle(heh_tmp)
 
             return vh0, vh1, vh2, vh3
-        def would_flip_triangle_in_2D(omesh, eh, vertices):
+        def would_flip_triangle_in_2D(omesh, vhs, vertices):
             vh0, vh1, vh2, vh3 = vhs
 
             sv0 = vertices[vh0.idx()]
@@ -214,7 +214,7 @@ def flip_until_scdt(omesh, vertices):
 
     return
 
-#TODO cog stub currently
+#TODO change largest area to largest circumradius
 def find_largest_failing_triangle(omesh):
     def vertices_of_face_handle(omesh, fh):
         hh = omesh.halfedge_handle(fh)
@@ -229,60 +229,104 @@ def find_largest_failing_triangle(omesh):
         p2 = omesh.point(vh2)
 
         return p0, p1, p2
+    def shape_test(p0, p1, p2):
+        alpha = calculate_angle_in_corner(p0, p1, p2)
+        beta = calculate_angle_in_corner(p1, p2, p0)
+        gamma = calculate_angle_in_corner(p2, p0, p1)
+
+        return min(alpha, beta, gamma) > SMALLEST_ANGLE
+    def size_test(p0, p1, p2):
+        t_size = calculate_area(p0, p1, p2)
+
+        return t_size <= SIZE_THRESHOLD, t_size
     delta = openmesh.FaceHandle(-1)
     delta_size = float('-inf')
 
     for fh in omesh.faces():
         p0, p1, p2 = vertices_of_face_handle(omesh, fh)
-        size = calculate_area(p0, p1, p2)
-        if size < SIZE_THRESHOLD:
-            continue
-        if size > delta_size:
-            delta = fh
-            delta_size = size
 
-    print(fh.idx(), delta_size)
+        well_shaped = shape_test(p0, p1, p2)
+        well_sized, t_size = size_test(p0, p1, p2)
+
+        if well_shaped and well_sized:
+            continue
+
+        if t_size > delta_size:
+            delta_size = t_size
+            delta = fh
+        else:
+            assert delta.idx() >= 0
 
     return delta
 
-def insert_cog(omesh, vertices, delta):
-    hh = omesh.halfedge_handle(delta)
-    vh0 = omesh.from_vertex_handle(hh)
-    hh = omesh.next_halfedge_handle(hh)
-    vh1 = omesh.from_vertex_handle(hh)
-    hh = omesh.next_halfedge_handle(hh)
-    vh2 = omesh.from_vertex_handle(hh)
+def calculate_surface_circumcenter(omesh, vertices, delta):
+    #TODO
 
-    p0 = vertices[vh0.idx()].UV_vec2()
-    p1 = vertices[vh1.idx()].UV_vec2()
-    p2 = vertices[vh2.idx()].UV_vec2()
-    cog = (p0+p1+p2) / 3
+    return SuperVertex()
 
-    sv_cog = SuperVertex(u=cog[0], v=cog[1])
-    sv_cog.face_id = vertices[0].face_id
-    sv_cog.face = vertices[0].face
-    sv_cog.project_to_XYZ()
-    vertices.append(sv_cog)
+def travel(omesh, vertices, delta, scc):
+    segment = openmesh.EdgeHandle(-1)
+    triangle = openmesh.FaceHandle(-1)
 
-    vh_cog = omesh.add_vertex(sv_cog.XYZ_vec3())
-    openmesh.TriMesh.split(omesh, delta, vh_cog)
+    #TODO
+
+    return segment, triangle
+
+def insert_inner_vertex(omesh, vertices, fh, sv):
+    vertices.append(sv)
+
+    vh = omesh.add_vertex(sv.XYZ_vec3())
+    openmesh.TriMesh.split(omesh, fh, vh)
     omesh.garbage_collection()
 
     return
 
+def remove_inner_vertex(omesh, vertices, vh):
+    assert vertices[vh.idx()].edges_with_p is None
+    assert not omesh.is_boundary(vh)
+
+    #TODO
+
+    return
+
 def split_segment(omesh, vertices, eh):
+    def remove_encroaching_vertices(omesh, vertices, vh, h):
+        def remove_one_encroaching_vertex(omesh, vertices, phw, h):
+            for vh in omesh.vertices():
+                pcurr = np.array((omesh.point(vh)))
+
+                #TODO consider inf dist if segment in line of sight
+                if np.linalg.norm(phw - pcurr) < h:
+                    remove_vertex(omesh, vertices, vh)
+                    return True
+
+            return False
+        phw = np.array((omesh.point(vhhw)))
+
+        while remove_one_encroaching_vertex(omesh, phw, h):
+            continue
+
+        return
+    assert omesh.is_boundary(eh)
+
     hh = omesh.halfedge_handle(eh, 0)
     vh0 = omesh.from_vertex_handle(hh)
     vh1 = omesh.to_vertex_handle(hh)
-
     sv0 = vertices[vh0.idx()]
     sv1 = vertices[vh1.idx()]
+
+    # calculate halfway vertex
     svhw = SuperVertex.compute_halfway_on_shared_edge(sv0, sv1)
     vertices.append(svhw)
 
+    # split segment
     vhhw = omesh.add_vertex(svhw.XYZ_vec3())
     omesh.split_edge(eh, vhhw)
     omesh.garbage_collection()
+
+    # remove encroaching vertices
+    h = np.linalg.norm(svhw.XYZ_vec3(), sv0.XYZ_vec3())
+    remove_encroaching_vertices(omesh, vertices, vhhw, h)
 
     return
 
@@ -318,6 +362,7 @@ def chew93_Surface(face_mesh):
     omesh = parse_into_openmesh(face_mesh)
     flip_until_scdt(omesh, vertices)
 
+    # step 2+3: find largest triangle that fails shape ans size criteria
     delta = find_largest_failing_triangle(omesh)
 
     cnt = 0
@@ -326,11 +371,22 @@ def chew93_Surface(face_mesh):
             # break
         print('iteration', cnt)
         cnt += 1
-        insert_cog(omesh, vertices, delta)
+        # step 4: travel from any triangle vertex to c and return hit segment id
+        scc = calculate_surface_circumcenter(omesh, vertices, delta)
+        segment, triangle = travel(omesh, vertices, delta, scc)
 
-        #TODO
+        if triangle.is_valid():
+            # step 5: no segment was hit, insert scc into triangle
+            insert_inner_vertex(omesh, vertices, triangle, scc)
+        else:
+            # step 6: segment was hit, split
+            assert segment.is_valid()
+            split_segment(omesh, vertices, segment)
 
+        # after vertex insertion and possible deletion, restore SCDT criteria
         flip_until_scdt(omesh, vertices)
+
+        # step 2+3: find largest triangle that fails shape ans size criteria
         delta = find_largest_failing_triangle(omesh)
 
     parse_triangles_back(omesh, face_mesh)
