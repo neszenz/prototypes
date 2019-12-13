@@ -8,6 +8,7 @@ first step is to compute constrained Delaunay Triangulations w/ pytriangle and
 then apply my implementation of Chew's Surface Delaunay Refinement algorithm.
 """
 from gerobust.predicates import clockwise, counter_clockwise
+from gerobust import wrapper
 import numpy as np
 import triangle as shewchuk_triangle
 import openmesh
@@ -28,7 +29,7 @@ SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = float('inf')
 
 # __main__ config
-INPUT_PATH = paths.STEP_SPHERE
+INPUT_PATH = paths.STEP_BOX
 OUTPUT_DIR = paths.DIR_TMP
 
 def triangulate_cdt(face_mesh):
@@ -302,11 +303,46 @@ def travel(omesh, vertices, delta, scc):
 
     return segment, triangle
 
-def insert_inner_vertex(omesh, vertices, fh, sv):
-    vertices.append(sv)
+def insert_inner_vertex(omesh, vertices, fh, sv_new):
+    # vertex insert (vertex list and omesh)
+    new_index = len(vertices)
+    vertices.append(sv_new)
 
-    vh = omesh.add_vertex(sv.XYZ_vec3())
-    openmesh.TriMesh.split(omesh, fh, vh)
+    vh_new = omesh.add_vertex(sv_new.XYZ_vec3())
+    assert vh_new.idx() == new_index
+
+    # integrating into triangulation of omesh
+    hh0 = omesh.halfedge_handle(fh)
+    hh1 = omesh.next_halfedge_handle(hh0)
+    hh2 = omesh.next_halfedge_handle(hh1)
+    vh0 = omesh.from_vertex_handle(hh0)
+    vh1 = omesh.from_vertex_handle(hh1)
+    vh2 = omesh.from_vertex_handle(hh2)
+
+    p0 = vertices[vh0.idx()].UV_vec2()
+    p1 = vertices[vh1.idx()].UV_vec2()
+    p2 = vertices[vh2.idx()].UV_vec2()
+    p_new = sv_new.UV_vec2()
+
+    orient0 = wrapper.orientation_fast(tuple(p0), tuple(p1), tuple(p_new))
+    orient1 = wrapper.orientation_fast(tuple(p1), tuple(p2), tuple(p_new))
+    orient2 = wrapper.orientation_fast(tuple(p2), tuple(p0), tuple(p_new))
+
+    if np.allclose(orient0, 0.0): # p0, p1 and p_new are colinear
+        assert orient1 > 0.0
+        assert orient2 > 0.0
+        omesh.split_edge(omesh.edge_handle(hh0), vh_new)
+    elif np.allclose(orient1, 0.0): # p1, p2 and p_new are colinear
+        assert orient2 > 0.0
+        omesh.split_edge(omesh.edge_handle(hh1), vh_new)
+    elif np.allclose(orient2, 0.0): # p2, p0 and p_new are colinear
+        omesh.split_edge(omesh.edge_handle(hh2), vh_new)
+    else:
+        assert orient0 > 0.0
+        assert orient1 > 0.0
+        assert orient2 > 0.0
+        openmesh.TriMesh.split(omesh, fh, vh_new)
+
     omesh.garbage_collection()
 
     return
