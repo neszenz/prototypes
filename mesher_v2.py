@@ -114,26 +114,39 @@ def parse_into_openmesh(face_mesh):
 
     return omesh
 
+def collect_quadrilateral_vertices(omesh, eh):
+    hh0 = omesh.halfedge_handle(eh, 0)
+    hh1 = omesh.halfedge_handle(eh, 1)
+
+    heh_tmp = hh0
+    vh0 = omesh.from_vertex_handle(heh_tmp)
+    heh_tmp = omesh.next_halfedge_handle(heh_tmp)
+    vh1 = omesh.from_vertex_handle(heh_tmp)
+    heh_tmp = omesh.next_halfedge_handle(heh_tmp)
+    vh2 = omesh.from_vertex_handle(heh_tmp)
+    assert omesh.to_vertex_handle(heh_tmp) == vh0
+    heh_tmp = hh1
+    assert omesh.to_vertex_handle(heh_tmp) == vh0
+    assert omesh.from_vertex_handle(heh_tmp) == vh1
+    heh_tmp = omesh.next_halfedge_handle(heh_tmp)
+    vh3 = omesh.to_vertex_handle(heh_tmp)
+
+    return vh0, vh1, vh2, vh3
+
+def collect_triangle_vertices(omesh, fh):
+    hh = omesh.halfedge_handle(fh)
+
+    vh0 = omesh.from_vertex_handle(hh)
+    hh = omesh.next_halfedge_handle(hh)
+    vh1 = omesh.from_vertex_handle(hh)
+    hh = omesh.next_halfedge_handle(hh)
+    vh2 = omesh.from_vertex_handle(hh)
+    assert omesh.to_vertex_handle(hh) == vh0
+
+    return vh0, vh1, vh2
+
 def flip_until_scdt(omesh, vertices):
     def flip_one_non_scdt_edge(omesh, vertices):
-        def collect_quadrilateral_vertices(omesh, eh):
-            heh0 = omesh.halfedge_handle(eh, 0)
-            heh1 = omesh.halfedge_handle(eh, 1)
-
-            heh_tmp = heh0
-            vh0 = omesh.from_vertex_handle(heh_tmp)
-            heh_tmp = omesh.next_halfedge_handle(heh_tmp)
-            vh1 = omesh.from_vertex_handle(heh_tmp)
-            heh_tmp = omesh.next_halfedge_handle(heh_tmp)
-            vh2 = omesh.from_vertex_handle(heh_tmp)
-            assert omesh.to_vertex_handle(heh_tmp) == vh0
-            heh_tmp = heh1
-            assert omesh.to_vertex_handle(heh_tmp) == vh0
-            assert omesh.from_vertex_handle(heh_tmp) == vh1
-            heh_tmp = omesh.next_halfedge_handle(heh_tmp)
-            vh3 = omesh.to_vertex_handle(heh_tmp)
-
-            return vh0, vh1, vh2, vh3
         def would_flip_triangle_in_2D(omesh, vhs, vertices):
             vh0, vh1, vh2, vh3 = vhs
 
@@ -216,19 +229,6 @@ def flip_until_scdt(omesh, vertices):
 
 #TODO change largest area to largest circumradius
 def find_largest_failing_triangle(omesh):
-    def vertices_of_face_handle(omesh, fh):
-        hh = omesh.halfedge_handle(fh)
-        vh0 = omesh.from_vertex_handle(hh)
-        hh = omesh.next_halfedge_handle(hh)
-        vh1 = omesh.from_vertex_handle(hh)
-        hh = omesh.next_halfedge_handle(hh)
-        vh2 = omesh.from_vertex_handle(hh)
-
-        p0 = omesh.point(vh0)
-        p1 = omesh.point(vh1)
-        p2 = omesh.point(vh2)
-
-        return p0, p1, p2
     def shape_test(p0, p1, p2):
         alpha = calculate_angle_in_corner(p0, p1, p2)
         beta = calculate_angle_in_corner(p1, p2, p0)
@@ -243,7 +243,10 @@ def find_largest_failing_triangle(omesh):
     delta_size = float('-inf')
 
     for fh in omesh.faces():
-        p0, p1, p2 = vertices_of_face_handle(omesh, fh)
+        vh0, vh1, vh2 = collect_triangle_vertices(omesh, fh)
+        p0 = omesh.point(vh0)
+        p1 = omesh.point(vh1)
+        p2 = omesh.point(vh2)
 
         well_shaped = shape_test(p0, p1, p2)
         well_sized, t_size = size_test(p0, p1, p2)
@@ -260,10 +263,37 @@ def find_largest_failing_triangle(omesh):
     return delta
 
 def calculate_surface_circumcenter(omesh, vertices, delta):
-    #TODO
+    def barycentric_circumcenter(pa, pb, pc):
+        a = np.linalg.norm(pc-pb)
+        b = np.linalg.norm(pa-pc)
+        c = np.linalg.norm(pb-pa)
 
-    return SuperVertex()
+        a_squared = a*a
+        b_squared = b*b
+        c_squared = c*c
+        bx = a_squared * (b_squared + c_squared - a_squared)
+        by = b_squared * (c_squared + a_squared - b_squared)
+        bz = c_squared * (a_squared + b_squared - c_squared)
 
+        return np.array((bx, by, bz))
+    vh0, vh1, vh2 = collect_triangle_vertices(omesh, delta)
+
+    sv0 = vertices[vh0.idx()]
+    sv1 = vertices[vh1.idx()]
+    sv2 = vertices[vh2.idx()]
+
+    bx, by, bz = barycentric_circumcenter(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+
+    u, v    = (bx*sv0.UV_vec2()  + by*sv1.UV_vec2()  + bz*sv2.UV_vec2())  / (bx+by+bz)
+
+    scc = SuperVertex(u=u, v=v)
+    scc.face_id = sv0.face_id
+    scc.face = sv0.face
+    scc.project_to_XYZ()
+
+    return scc
+
+#TODO
 def travel(omesh, vertices, delta, scc):
     segment = openmesh.EdgeHandle(-1)
     triangle = openmesh.FaceHandle(-1)
@@ -281,6 +311,7 @@ def insert_inner_vertex(omesh, vertices, fh, sv):
 
     return
 
+#TODO
 def remove_inner_vertex(omesh, vertices, vh):
     assert vertices[vh.idx()].edges_with_p is None
     assert not omesh.is_boundary(vh)
@@ -289,6 +320,7 @@ def remove_inner_vertex(omesh, vertices, vh):
 
     return
 
+#TODO
 def split_segment(omesh, vertices, eh):
     def remove_encroaching_vertices(omesh, vertices, vh, h):
         def remove_one_encroaching_vertex(omesh, vertices, phw, h):
