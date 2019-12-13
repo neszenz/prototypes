@@ -27,6 +27,7 @@ sampler.NUMBER_OF_SAMPLES = 10
 sampler.INCLUDE_INNER_WIRES = True
 SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = float('inf')
+MAX_ITERATIONS = 0 # -1 for unlimited
 
 # __main__ config
 INPUT_PATH = paths.STEP_BOX
@@ -286,7 +287,9 @@ def calculate_surface_circumcenter(omesh, vertices, delta):
     bx, by, bz = barycentric_circumcenter(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
 
     u, v    = (bx*sv0.UV_vec2()  + by*sv1.UV_vec2()  + bz*sv2.UV_vec2())  / (bx+by+bz)
+    # x, y, z = (bx*sv0.XYZ_vec3() + by*sv1.XYZ_vec3() + bz*sv2.XYZ_vec3()) / (bx+by+bz)
 
+    # scc = SuperVertex(x, y, z, u, v)
     scc = SuperVertex(u=u, v=v)
     scc.face_id = sv0.face_id
     scc.face = sv0.face
@@ -433,12 +436,16 @@ def chew93_Surface(face_mesh):
     # step 2+3: find largest triangle that fails shape ans size criteria
     delta = find_largest_failing_triangle(omesh)
 
-    cnt = 0
-    while delta.is_valid():
-        # if cnt >= 0:
-            # break
-        print('iteration', cnt)
-        cnt += 1
+    #TODO remove
+    scc = calculate_surface_circumcenter(omesh, vertices, delta)
+    insert_inner_vertex(omesh, vertices, delta, scc)
+    flip_until_scdt(omesh, vertices)
+    #TODO remove
+
+    iter_counter = 0
+    while delta.is_valid() and iter_counter != MAX_ITERATIONS:
+        print('iteration', iter_counter)
+
         # step 4: travel from any triangle vertex to c and return hit segment id
         scc = calculate_surface_circumcenter(omesh, vertices, delta)
         segment, triangle = travel(omesh, vertices, delta, scc)
@@ -454,8 +461,9 @@ def chew93_Surface(face_mesh):
         # after vertex insertion and possible deletion, restore SCDT criteria
         flip_until_scdt(omesh, vertices)
 
-        # step 2+3: find largest triangle that fails shape ans size criteria
+        # update for next iteration
         delta = find_largest_failing_triangle(omesh)
+        iter_counter += 1
 
     parse_triangles_back(omesh, face_mesh)
 
