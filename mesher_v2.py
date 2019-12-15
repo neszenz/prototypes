@@ -30,7 +30,7 @@ SIZE_THRESHOLD = float('inf')
 MAX_ITERATIONS = 0 # -1 for unlimited
 
 # __main__ config
-INPUT_PATH = paths.STEP_BOX
+INPUT_PATH = paths.STEP_SPHERE
 OUTPUT_DIR = paths.DIR_TMP
 
 def triangulate_cdt(face_mesh):
@@ -350,12 +350,23 @@ def insert_inner_vertex(omesh, vertices, fh, sv_new):
 
     return
 
-#TODO
 def remove_inner_vertex(omesh, vertices, vh):
     assert vertices[vh.idx()].edges_with_p is None
     assert not omesh.is_boundary(vh)
 
-    #TODO
+    # find incident halfedge to remove vertex from omesh
+    collapse_hh = openmesh.Halfedge_Handle(-1)
+    for hh in omesh.voh(vh):
+        if omesh.is_collapse_ok(hh):
+            collapse_hh = hh
+            break
+
+    if collapse_hh.is_valid():
+        del vertices[vh.idx()]
+        omesh.collapse(hh)
+        omesh.garbage_collection()
+    else:
+        raise Exception('remove_inner_vertex() error - vertex could not be collapsed onto neighbor')
 
     return
 
