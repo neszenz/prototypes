@@ -135,7 +135,7 @@ def collect_quadrilateral_vertices(omesh, eh):
 
     return vh0, vh1, vh2, vh3
 
-def collect_triangle_vertices(omesh, fh):
+def collect_triangle_vertex_handles(omesh, fh):
     hh = omesh.halfedge_handle(fh)
 
     vh0 = omesh.from_vertex_handle(hh)
@@ -146,6 +146,15 @@ def collect_triangle_vertices(omesh, fh):
     assert omesh.to_vertex_handle(hh) == vh0
 
     return vh0, vh1, vh2
+
+def collect_triangle_supervertices(omesh, vertices, fh):
+    vh0, vh1, vh2 = collect_triangle_vertex_handles(omesh, fh)
+
+    sv0 = vertices[vh0.idx()]
+    sv1 = vertices[vh1.idx()]
+    sv2 = vertices[vh2.idx()]
+
+    return sv0, sv1, sv2
 
 def flip_until_scdt(omesh, vertices):
     def flip_one_non_scdt_edge(omesh, vertices):
@@ -245,7 +254,7 @@ def find_largest_failing_triangle(omesh):
     delta_size = float('-inf')
 
     for fh in omesh.faces():
-        vh0, vh1, vh2 = collect_triangle_vertices(omesh, fh)
+        vh0, vh1, vh2 = collect_triangle_vertex_handles(omesh, fh)
         p0 = omesh.point(vh0)
         p1 = omesh.point(vh1)
         p2 = omesh.point(vh2)
@@ -264,30 +273,37 @@ def find_largest_failing_triangle(omesh):
 
     return delta
 
-def calculate_surface_circumcenter(omesh, vertices, delta):
-    def barycentric_circumcenter(pa, pb, pc):
-        a = np.linalg.norm(pc-pb)
-        b = np.linalg.norm(pa-pc)
-        c = np.linalg.norm(pb-pa)
+# calculate barycentric coordinates of 3-dimensional circumcenter
+def calculate_bcc(omesh, vertices, delta):
+    sv0, sv1, sv2 = collect_triangle_supervertices(omesh, vertices, delta)
 
-        a_squared = a*a
-        b_squared = b*b
-        c_squared = c*c
-        bx = a_squared * (b_squared + c_squared - a_squared)
-        by = b_squared * (c_squared + a_squared - b_squared)
-        bz = c_squared * (a_squared + b_squared - c_squared)
+    A = sv0.XYZ_vec3()
+    B = sv1.XYZ_vec3()
+    C = sv2.XYZ_vec3()
 
-        return np.array((bx, by, bz))
-    vh0, vh1, vh2 = collect_triangle_vertices(omesh, delta)
+    a = np.linalg.norm(C-B)
+    b = np.linalg.norm(A-C)
+    c = np.linalg.norm(B-A)
+    a_squared = a*a
+    b_squared = b*b
+    c_squared = c*c
 
-    sv0 = vertices[vh0.idx()]
-    sv1 = vertices[vh1.idx()]
-    sv2 = vertices[vh2.idx()]
+    bx = a_squared * (b_squared + c_squared - a_squared)
+    by = b_squared * (c_squared + a_squared - b_squared)
+    bz = c_squared * (a_squared + b_squared - c_squared)
 
-    bx, by, bz = barycentric_circumcenter(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+    return np.array((bx, by, bz))
 
-    u, v    = (bx*sv0.UV_vec2()  + by*sv1.UV_vec2()  + bz*sv2.UV_vec2())  / (bx+by+bz)
-    # x, y, z = (bx*sv0.XYZ_vec3() + by*sv1.XYZ_vec3() + bz*sv2.XYZ_vec3()) / (bx+by+bz)
+def cartesian_from_barycentric(p0, p1, p2, bx, by, bz):
+    return (bx*p0 + by*p1 + bz*p2) / (bx+by+bz)
+
+#TODO correct approxcimation by normal convergence
+# calculate surface circumcenter based on circumcenter in barycentric coordinates
+def scc_from_bcc(omesh, vertices, delta, bcc):
+    sv0, sv1, sv2 = collect_triangle_supervertices(omesh, vertices, delta)
+
+    u, v    = cartesian_from_barycentric(sv0.UV_vec2(),  sv1.UV_vec2(),  sv2.UV_vec2(),  *bcc)
+    # x, y, z = cartesian_from_barycentric(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3(), *bcc)
 
     # scc = SuperVertex(x, y, z, u, v)
     scc = SuperVertex(u=u, v=v)
@@ -298,7 +314,7 @@ def calculate_surface_circumcenter(omesh, vertices, delta):
     return scc
 
 #TODO
-def travel(omesh, vertices, delta, scc):
+def travel(omesh, vertices, delta, bcc):
     segment = openmesh.EdgeHandle(-1)
     triangle = openmesh.FaceHandle(-1)
 
@@ -370,7 +386,7 @@ def remove_inner_vertex(omesh, vertices, vh):
 
     return
 
-#TODO
+#TODO consider inf dist if segment in line of sight
 def split_segment(omesh, vertices, eh):
     def remove_encroaching_vertices(omesh, vertices, vh, h):
         def remove_one_encroaching_vertex(omesh, vertices, phw, h):
@@ -447,22 +463,17 @@ def chew93_Surface(face_mesh):
     # step 2+3: find largest triangle that fails shape ans size criteria
     delta = find_largest_failing_triangle(omesh)
 
-    #TODO remove
-    scc = calculate_surface_circumcenter(omesh, vertices, delta)
-    insert_inner_vertex(omesh, vertices, delta, scc)
-    flip_until_scdt(omesh, vertices)
-    #TODO remove
-
     iter_counter = 0
     while delta.is_valid() and iter_counter != MAX_ITERATIONS:
         print('iteration', iter_counter)
 
         # step 4: travel from any triangle vertex to c and return hit segment id
-        scc = calculate_surface_circumcenter(omesh, vertices, delta)
-        segment, triangle = travel(omesh, vertices, delta, scc)
+        bcc = calculate_bcc(omesh, vertices, delta)
+        segment, triangle = travel(omesh, vertices, delta, bcc)
 
         if triangle.is_valid():
             # step 5: no segment was hit, insert scc into triangle
+            scc = scc_from_bcc(omesh, vertices, delta, bcc)
             insert_inner_vertex(omesh, vertices, triangle, scc)
         else:
             # step 6: segment was hit, split
