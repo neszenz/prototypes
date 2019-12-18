@@ -7,6 +7,7 @@ To gain a foundation for the meshing process, sampler.py is used to generate a
 first step is to compute constrained Delaunay Triangulations w/ pytriangle and
 then apply my implementation of Chew's Surface Delaunay Refinement algorithm.
 """
+import copy
 import ctypes
 from gerobust.predicates import clockwise, counter_clockwise
 from gerobust import wrapper
@@ -487,15 +488,17 @@ def split_edge(omesh, vertices, eh):
 
     return
 
+#TODO make less stupid
 def parse_back(omesh, face_mesh):
     vertices, _, triangles, _ = face_mesh
 
-    new_vertices = []
-    for vh in omesh.vertices():
-        sv = sv_from_vh(omesh, vh)
-        assert np.allclose(sv.XYZ_vec3(), omesh.point(vh))
-        new_vertices.append(sv)
-    vertices = new_vertices
+    vertices_tmp = []
+    assert len(vertices) == len(omesh.vertices())
+    for i in range(len(omesh.vertices())):
+        sv = sv_from_vh(omesh, om.VertexHandle(i))
+        vertices_tmp.append(sv)
+    for i in range(len(vertices_tmp)):
+        vertices[i] = vertices_tmp[i]
 
     triangles.clear()
     for fh in omesh.faces():
