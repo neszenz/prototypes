@@ -7,11 +7,12 @@ To gain a foundation for the meshing process, sampler.py is used to generate a
 first step is to compute constrained Delaunay Triangulations w/ pytriangle and
 then apply my implementation of Chew's Surface Delaunay Refinement algorithm.
 """
+import ctypes
 from gerobust.predicates import clockwise, counter_clockwise
 from gerobust import wrapper
 import numpy as np
 import triangle as shewchuk_triangle
-import openmesh
+import openmesh as om
 
 import paths
 import sampler
@@ -27,11 +28,31 @@ sampler.NUMBER_OF_SAMPLES = 10
 sampler.INCLUDE_INNER_WIRES = True
 SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = float('inf')
-MAX_ITERATIONS = 0 # -1 for unlimited
+MAX_ITERATIONS = 50 # -1 for unlimited
 
 # __main__ config
-INPUT_PATH = paths.STEP_SPHERE
+INPUT_PATH = paths.STEP_SURFFIL
 OUTPUT_DIR = paths.DIR_TMP
+
+def triangulate_dt(vertices):
+    triangles = []
+
+    t = shewchuk_triangle.Triangle()
+
+    points = [(sv.u, sv.v) for sv in vertices]
+    markers = [1] * len(points)
+    segments = [(i, (i+1)%len(vertices)) for i in range(len(vertices))]
+
+    t.set_points(points, markers=markers)
+    t.set_segments(segments)
+
+    t.triangulate(mode='pzQ')
+
+    for triNode in t.get_triangles():
+        ([i0, i1, i2], neighbors, attri) = triNode
+        triangles.append((i0, i1, i2))
+
+    return triangles
 
 def triangulate_cdt(face_mesh):
     def segments_from_wires(vertices, wire_meshes):
@@ -98,14 +119,30 @@ def triangulate_cdt(face_mesh):
 
     return
 
+def set_supervertex_property(omesh, vh, sv):
+    omesh.set_vertex_property('supervertex', vh, id(sv))
+    return
+
+def sv_from_vh(omesh, vh):
+    int_id = int(omesh.vertex_property_array('supervertex')[vh.idx()])
+    return ctypes.cast(int_id, ctypes.py_object).value
+
+def vh_from_sv(omesh, sv):
+    supervertices = omesh.vertex_property_array('supervertex')
+    result = np.where(supervertices == id(sv))
+    assert np.shape(result) == (1, 1)
+    return om.VertexHandle(result[0][0])
+
 def parse_into_openmesh(face_mesh):
     vertices, _, triangles, _ = face_mesh
 
-    omesh = openmesh.TriMesh()
+    omesh = om.TriMesh()
 
     vertex_handles = []
     for sv in vertices:
-        vertex_handles.append(omesh.add_vertex(sv.XYZ_vec3()))
+        vh = omesh.add_vertex(sv.XYZ_vec3())
+        set_supervertex_property(omesh, vh, sv)
+        vertex_handles.append(vh)
 
     for triangle in triangles:
         i0, i1, i2 = triangle
@@ -147,24 +184,24 @@ def collect_triangle_vertex_handles(omesh, fh):
 
     return vh0, vh1, vh2
 
-def collect_triangle_supervertices(omesh, vertices, fh):
+def collect_triangle_supervertices(omesh, fh):
     vh0, vh1, vh2 = collect_triangle_vertex_handles(omesh, fh)
 
-    sv0 = vertices[vh0.idx()]
-    sv1 = vertices[vh1.idx()]
-    sv2 = vertices[vh2.idx()]
+    sv0 = sv_from_vh(omesh, vh0)
+    sv1 = sv_from_vh(omesh, vh1)
+    sv2 = sv_from_vh(omesh, vh2)
 
     return sv0, sv1, sv2
 
-def flip_until_scdt(omesh, vertices):
-    def flip_one_non_scdt_edge(omesh, vertices):
-        def would_flip_triangle_in_2D(omesh, vhs, vertices):
+def flip_until_scdt(omesh):
+    def flip_one_non_scdt_edge(omesh):
+        def would_flip_triangle_in_2D(omesh, vhs):
             vh0, vh1, vh2, vh3 = vhs
 
-            sv0 = vertices[vh0.idx()]
-            sv1 = vertices[vh1.idx()]
-            sv2 = vertices[vh2.idx()]
-            sv3 = vertices[vh3.idx()]
+            sv0 = sv_from_vh(omesh, vh0)
+            sv1 = sv_from_vh(omesh, vh1)
+            sv2 = sv_from_vh(omesh, vh2)
+            sv3 = sv_from_vh(omesh, vh3)
             assert np.allclose(sv0.XYZ_vec3(), omesh.point(vh0))
             assert np.allclose(sv1.XYZ_vec3(), omesh.point(vh1))
             assert np.allclose(sv2.XYZ_vec3(), omesh.point(vh2))
@@ -222,7 +259,7 @@ def flip_until_scdt(omesh, vertices):
 
             vhs = collect_quadrilateral_vertices(omesh, eh)
 
-            if would_flip_triangle_in_2D(omesh, vhs, vertices):
+            if would_flip_triangle_in_2D(omesh, vhs):
                 continue
 
             if flip_maximizes_minimum_angle(omesh, vhs):
@@ -233,7 +270,7 @@ def flip_until_scdt(omesh, vertices):
                 continue
 
         return False
-    while flip_one_non_scdt_edge(omesh, vertices):
+    while flip_one_non_scdt_edge(omesh):
         continue
 
     return
@@ -250,7 +287,7 @@ def find_largest_failing_triangle(omesh):
         t_size = calculate_area(p0, p1, p2)
 
         return t_size <= SIZE_THRESHOLD, t_size
-    delta = openmesh.FaceHandle(-1)
+    delta = om.FaceHandle(-1)
     delta_size = float('-inf')
 
     for fh in omesh.faces():
@@ -274,13 +311,7 @@ def find_largest_failing_triangle(omesh):
     return delta
 
 # calculate barycentric coordinates of 3-dimensional circumcenter
-def calculate_bcc(omesh, vertices, delta):
-    sv0, sv1, sv2 = collect_triangle_supervertices(omesh, vertices, delta)
-
-    A = sv0.XYZ_vec3()
-    B = sv1.XYZ_vec3()
-    C = sv2.XYZ_vec3()
-
+def calculate_bcc(A, B, C):
     a = np.linalg.norm(C-B)
     b = np.linalg.norm(A-C)
     c = np.linalg.norm(B-A)
@@ -299,11 +330,9 @@ def cartesian_from_barycentric(p0, p1, p2, bx, by, bz):
 
 #TODO correct approxcimation by normal convergence
 # calculate surface circumcenter based on circumcenter in barycentric coordinates
-def scc_from_bcc(omesh, vertices, delta, bcc):
-    sv0, sv1, sv2 = collect_triangle_supervertices(omesh, vertices, delta)
-
+def scc_from_bcc(sv0, sv1, sv2, bcc):
     u, v    = cartesian_from_barycentric(sv0.UV_vec2(),  sv1.UV_vec2(),  sv2.UV_vec2(),  *bcc)
-    # x, y, z = cartesian_from_barycentric(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3(), *bcc)
+    x, y, z = cartesian_from_barycentric(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3(), *bcc)
 
     # scc = SuperVertex(x, y, z, u, v)
     scc = SuperVertex(u=u, v=v)
@@ -313,22 +342,42 @@ def scc_from_bcc(omesh, vertices, delta, bcc):
 
     return scc
 
-#TODO
-def travel(omesh, vertices, delta, bcc):
-    segment = openmesh.EdgeHandle(-1)
-    triangle = openmesh.FaceHandle(-1)
+def calculate_refinement(omesh, delta):
+    hhc = omesh.halfedge_handle(delta)
+    hha = omesh.next_halfedge_handle(hhc)
+    hhb = omesh.next_halfedge_handle(hha)
+    svA = sv_from_vh(omesh, omesh.from_vertex_handle(hhc))
+    svB = sv_from_vh(omesh, omesh.from_vertex_handle(hha))
+    svC = sv_from_vh(omesh, omesh.from_vertex_handle(hhb))
 
-    #TODO
+    bcc = calculate_bcc(svA.XYZ_vec3(), svB.XYZ_vec3(), svC.XYZ_vec3())
+    bx, by, bz = bcc
 
-    return segment, triangle
+    if np.allclose(bx, 0.0):
+        return omesh.edge_handle(hha), None
+    if np.allclose(by, 0.0):
+        return omesh.edge_handle(hhb), None
+    if np.allclose(bz, 0.0):
+        return omesh.edge_handle(hhc), None
+
+    if all(bcc > 0.0):
+        return delta, scc_from_bcc(svA, svB, svC, bcc)
+
+    if bx < 0.0:
+        return omesh.edge_handle(hha), None
+    if by < 0.0:
+        return omesh.edge_handle(hhb), None
+    if bz < 0.0:
+        return omesh.edge_handle(hhc), None
+
+    return om.BaseHandle(-1), SuperVertex()
 
 def insert_inner_vertex(omesh, vertices, fh, sv_new):
     # vertex insert (vertex list and omesh)
-    new_index = len(vertices)
     vertices.append(sv_new)
 
     vh_new = omesh.add_vertex(sv_new.XYZ_vec3())
-    assert vh_new.idx() == new_index
+    set_supervertex_property(omesh, vh_new, sv_new)
 
     # integrating into triangulation of omesh
     hh0 = omesh.halfedge_handle(fh)
@@ -338,9 +387,9 @@ def insert_inner_vertex(omesh, vertices, fh, sv_new):
     vh1 = omesh.from_vertex_handle(hh1)
     vh2 = omesh.from_vertex_handle(hh2)
 
-    p0 = vertices[vh0.idx()].UV_vec2()
-    p1 = vertices[vh1.idx()].UV_vec2()
-    p2 = vertices[vh2.idx()].UV_vec2()
+    p0 = sv_from_vh(omesh, vh0).UV_vec2()
+    p1 = sv_from_vh(omesh, vh1).UV_vec2()
+    p2 = sv_from_vh(omesh, vh2).UV_vec2()
     p_new = sv_new.UV_vec2()
 
     orient0 = wrapper.orientation_fast(tuple(p0), tuple(p1), tuple(p_new))
@@ -360,85 +409,93 @@ def insert_inner_vertex(omesh, vertices, fh, sv_new):
         assert orient0 > 0.0
         assert orient1 > 0.0
         assert orient2 > 0.0
-        openmesh.TriMesh.split(omesh, fh, vh_new)
+        om.TriMesh.split(omesh, fh, vh_new)
 
     omesh.garbage_collection()
 
     return
 
 def remove_inner_vertex(omesh, vertices, vh):
-    assert vertices[vh.idx()].edges_with_p is None
+    assert sv_from_vh(omesh, vh).edges_with_p is None
     assert not omesh.is_boundary(vh)
 
-    # find incident halfedge to remove vertex from omesh
-    collapse_hh = openmesh.Halfedge_Handle(-1)
-    for hh in omesh.voh(vh):
-        if omesh.is_collapse_ok(hh):
-            collapse_hh = hh
-            break
+    neighbors = []
+    for vvh in omesh.vv(vh):
+        neighbors.append(sv_from_vh(omesh, vvh))
 
-    if collapse_hh.is_valid():
-        del vertices[vh.idx()]
-        omesh.collapse(hh)
-        omesh.garbage_collection()
-    else:
-        raise Exception('remove_inner_vertex() error - vertex could not be collapsed onto neighbor')
+    triangles = triangulate_dt(neighbors)
+
+    vertices.remove(sv_from_vh(omesh, vh))
+    omesh.delete_vertex(vh, False)
+    omesh.garbage_collection()
+
+    for (i0, i1, i2) in triangles:
+        vh0 = vh_from_sv(omesh, neighbors[i0])
+        vh1 = vh_from_sv(omesh, neighbors[i1])
+        vh2 = vh_from_sv(omesh, neighbors[i2])
+        omesh.add_face(vh0, vh1, vh2)
 
     return
 
 #TODO consider inf dist if segment in line of sight
-def split_segment(omesh, vertices, eh):
+#TODO imporove encroaching vertices removal performance
+def split_edge(omesh, vertices, eh):
     def remove_encroaching_vertices(omesh, vertices, vh, h):
         def remove_one_encroaching_vertex(omesh, vertices, phw, h):
             for vh in omesh.vertices():
+                if omesh.is_boundary(vh):
+                    continue
+
                 pcurr = np.array((omesh.point(vh)))
 
                 #TODO consider inf dist if segment in line of sight
                 if np.linalg.norm(phw - pcurr) < h:
-                    remove_vertex(omesh, vertices, vh)
+                    remove_inner_vertex(omesh, vertices, vh)
                     return True
 
             return False
         phw = np.array((omesh.point(vhhw)))
 
-        while remove_one_encroaching_vertex(omesh, phw, h):
+        while remove_one_encroaching_vertex(omesh, vertices, phw, h):
             continue
 
         return
-    assert omesh.is_boundary(eh)
-
     hh = omesh.halfedge_handle(eh, 0)
     vh0 = omesh.from_vertex_handle(hh)
     vh1 = omesh.to_vertex_handle(hh)
-    sv0 = vertices[vh0.idx()]
-    sv1 = vertices[vh1.idx()]
+    sv0 = sv_from_vh(omesh, vh0)
+    sv1 = sv_from_vh(omesh, vh1)
 
     # calculate halfway vertex
-    svhw = SuperVertex.compute_halfway_on_shared_edge(sv0, sv1)
+    if omesh.is_boundary(eh):
+        svhw = SuperVertex.compute_halfway_on_shared_edge(sv0, sv1)
+    else:
+        svhw = SuperVertex.compute_halfway(sv0, sv1)
+
     vertices.append(svhw)
 
     # split segment
     vhhw = omesh.add_vertex(svhw.XYZ_vec3())
+    set_supervertex_property(omesh, vhhw, svhw)
     omesh.split_edge(eh, vhhw)
     omesh.garbage_collection()
 
     # remove encroaching vertices
-    h = np.linalg.norm(svhw.XYZ_vec3(), sv0.XYZ_vec3())
-    remove_encroaching_vertices(omesh, vertices, vhhw, h)
+    if omesh.is_boundary(eh):
+        h = np.linalg.norm(svhw.XYZ_vec3() - sv0.XYZ_vec3())
+        remove_encroaching_vertices(omesh, vertices, vhhw, h)
 
     return
 
-def are_consistent(omesh, vertices):
-    for vh in omesh.vertices():
-        if not all(vertices[vh.idx()].XYZ_vec3() == omesh.point(vh)):
-            return False
-
-    return True
-
-def parse_triangles_back(omesh, face_mesh):
+def parse_back(omesh, face_mesh):
     vertices, _, triangles, _ = face_mesh
 
-    assert are_consistent(omesh, vertices)
+    new_vertices = []
+    for vh in omesh.vertices():
+        sv = sv_from_vh(omesh, vh)
+        assert np.allclose(sv.XYZ_vec3(), omesh.point(vh))
+        new_vertices.append(sv)
+    vertices = new_vertices
 
     triangles.clear()
     for fh in omesh.faces():
@@ -458,36 +515,32 @@ def chew93_Surface(face_mesh):
     # step 1: compute initial CDT and iteratively transform into SCDT
     triangulate_cdt(face_mesh)
     omesh = parse_into_openmesh(face_mesh)
-    flip_until_scdt(omesh, vertices)
+    flip_until_scdt(omesh)
 
     # step 2+3: find largest triangle that fails shape ans size criteria
     delta = find_largest_failing_triangle(omesh)
 
+    global iter_counter
     iter_counter = 0
     while delta.is_valid() and iter_counter != MAX_ITERATIONS:
         print('iteration', iter_counter)
 
-        # step 4: travel from any triangle vertex to c and return hit segment id
-        bcc = calculate_bcc(omesh, vertices, delta)
-        segment, triangle = travel(omesh, vertices, delta, bcc)
+        handle, scc = calculate_refinement(omesh, delta)
 
-        if triangle.is_valid():
-            # step 5: no segment was hit, insert scc into triangle
-            scc = scc_from_bcc(omesh, vertices, delta, bcc)
-            insert_inner_vertex(omesh, vertices, triangle, scc)
+        if isinstance(handle, om.FaceHandle):
+            insert_inner_vertex(omesh, vertices, handle, scc)
         else:
-            # step 6: segment was hit, split
-            assert segment.is_valid()
-            split_segment(omesh, vertices, segment)
+            assert isinstance(handle, om.EdgeHandle)
+            split_edge(omesh, vertices, handle)
 
         # after vertex insertion and possible deletion, restore SCDT criteria
-        flip_until_scdt(omesh, vertices)
+        flip_until_scdt(omesh)
 
         # update for next iteration
         delta = find_largest_failing_triangle(omesh)
         iter_counter += 1
 
-    parse_triangles_back(omesh, face_mesh)
+    parse_back(omesh, face_mesh)
 
     return
 
