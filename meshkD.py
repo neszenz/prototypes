@@ -102,6 +102,17 @@ class SuperVertex:
 
         return sv_halfway
 
+    def compute_halfway(sv0, sv1):
+        p0 = sv0.UV_vec2()
+        p1 = sv1.UV_vec2()
+        phw = p0 + ((p1-p0)/2)
+        sv_halfway = SuperVertex(u=phw[0], v=phw[1])
+        sv_halfway.face_id = sv0.face_id
+        sv_halfway.face = sv0.face
+        sv_halfway.project_to_XYZ()
+
+        return sv_halfway
+
     def UV_vec2(self):
         return np.array([self.u, self.v])
     def UV_vec3(self):
