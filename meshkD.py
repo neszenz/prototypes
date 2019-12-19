@@ -99,9 +99,10 @@ class SuperVertex:
         sv_halfway.face_id = sv0.face_id
         sv_halfway.face = sv0.face
         sv_halfway.edges_with_p = [(shared_edge, p)]
+        if sv0.face.Orientation() == TopAbs_REVERSED:
+            sv_halfway.reverse_u()
 
         return sv_halfway
-
     def compute_halfway(sv0, sv1):
         p0 = sv0.UV_vec2()
         p1 = sv1.UV_vec2()
