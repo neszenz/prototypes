@@ -38,7 +38,7 @@ flags = {
     'draw_mesh1D' : True,
     'draw_mesh2D' : True,
     'flat_shading' : False,
-    'cull_faces' : True,
+    'cull_faces' : False,
     'draw_2d_mode' : False,
     'draw_origin' : False,
     'arrow_mode' : False, # draw lines as arrows; only in individual face mode

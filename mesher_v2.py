@@ -27,12 +27,14 @@ from OCC.Core.TopAbs import TopAbs_ON, TopAbs_IN
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 sampler.NUMBER_OF_SAMPLES = 10
 sampler.INCLUDE_INNER_WIRES = True
+sampler.SIMPLIFY_LINEAR_EDGES = False
 SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = float('inf')
-MAX_ITERATIONS = 50 # -1 for unlimited
+MAX_ITERATIONS = -1 # -1 for unlimited
+USE_TRAVEL_TEST = True
 
 # __main__ config
-INPUT_PATH = paths.STEP_SURFFIL
+INPUT_PATH = paths.STEP_SPHERE
 OUTPUT_DIR = paths.DIR_TMP
 
 def triangulate_dt(vertices):
@@ -333,7 +335,7 @@ def cartesian_from_barycentric(p0, p1, p2, bx, by, bz):
 # calculate surface circumcenter based on circumcenter in barycentric coordinates
 def scc_from_bcc(sv0, sv1, sv2, bcc):
     u, v    = cartesian_from_barycentric(sv0.UV_vec2(),  sv1.UV_vec2(),  sv2.UV_vec2(),  *bcc)
-    x, y, z = cartesian_from_barycentric(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3(), *bcc)
+    # x, y, z = cartesian_from_barycentric(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3(), *bcc)
 
     # scc = SuperVertex(x, y, z, u, v)
     scc = SuperVertex(u=u, v=v)
@@ -342,6 +344,50 @@ def scc_from_bcc(sv0, sv1, sv2, bcc):
     scc.project_to_XYZ()
 
     return scc
+
+# for triangle p0-p1-p2 returns orientation test results of all three edges with px
+def orientations(p0, p1, p2, px):
+    ori0 = wrapper.orientation_fast(tuple(p0), tuple(p1), tuple(px))
+    ori1 = wrapper.orientation_fast(tuple(p1), tuple(p2), tuple(px))
+    ori2 = wrapper.orientation_fast(tuple(p2), tuple(p0), tuple(px))
+
+    return ori0, ori1, ori2
+
+def travel(omesh, hh, p_orig, c_2d):
+    def lies_inside(omesh, fh, p):
+        sv0, sv1, sv2 = collect_triangle_supervertices(omesh, fh)
+        p0 = tuple(sv0.UV_vec2())
+        p1 = tuple(sv1.UV_vec2())
+        p2 = tuple(sv2.UV_vec2())
+
+        ori0, ori1, ori2 = orientations(p0, p1, p2, p)
+
+        if ori0 > 0.0 and ori1 > 0.0 and ori2 > 0.0:
+            return True
+
+        return False
+    p_orig = tuple(p_orig)
+    c_2d = tuple(c_2d)
+
+    while not omesh.is_boundary(hh):
+        hh = omesh.opposite_halfedge_handle(hh)
+        fh = omesh.face_handle(hh)
+
+        if lies_inside(omesh, fh, c_2d):
+            return fh
+
+        # which of the remaining edges is crossed to travel further in that direction
+        hh = omesh.next_halfedge_handle(hh)
+        vh_opposite = omesh.to_vertex_handle(hh)
+        p_opposite = tuple(sv_from_vh(omesh, vh_opposite).UV_vec2())
+        ori = wrapper.orientation_fast(p_orig, c_2d, p_opposite)
+        assert ori != 0.0
+
+        if ori < 0.0: # if orientation is clockwise
+            # select other edge, because line between p_orig and c_2d passes the other side
+            hh = omesh.next_halfedge_handle(hh)
+
+    return omesh.edge_handle(hh)
 
 def calculate_refinement(omesh, delta):
     hhc = omesh.halfedge_handle(delta)
@@ -354,6 +400,7 @@ def calculate_refinement(omesh, delta):
     bcc = calculate_bcc(svA.XYZ_vec3(), svB.XYZ_vec3(), svC.XYZ_vec3())
     bx, by, bz = bcc
 
+    # based on how barycentric coordinates work, we can first test for simple cases
     if np.allclose(bx, 0.0):
         return omesh.edge_handle(hha), None
     if np.allclose(by, 0.0):
@@ -361,17 +408,34 @@ def calculate_refinement(omesh, delta):
     if np.allclose(bz, 0.0):
         return omesh.edge_handle(hhc), None
 
+    scc = scc_from_bcc(svA, svB, svC, bcc)
+
     if all(bcc > 0.0):
-        return delta, scc_from_bcc(svA, svB, svC, bcc)
+        return delta, scc
 
+    # none of the simple cases are met; we need to invoke the travel algorithm
     if bx < 0.0:
-        return omesh.edge_handle(hha), None
-    if by < 0.0:
-        return omesh.edge_handle(hhb), None
-    if bz < 0.0:
-        return omesh.edge_handle(hhc), None
+        if USE_TRAVEL_TEST:
+            p_orig = svA.UV_vec2()
+            handle = travel(omesh, hha, p_orig, scc.UV_vec2())
+        else:
+            handle = omesh.edge_handle(hha)
+    elif by < 0.0:
+        if USE_TRAVEL_TEST:
+            p_orig = svB.UV_vec2()
+            handle = travel(omesh, hhb, p_orig, scc.UV_vec2())
+        else:
+            handle = omesh.edge_handle(hhb)
+    elif bz < 0.0:
+        if USE_TRAVEL_TEST:
+            p_orig = svC.UV_vec2()
+            handle = travel(omesh, hhc, p_orig, scc.UV_vec2())
+        else:
+            handle = omesh.edge_handle(hhc)
+    else:
+        raise Exception('calculate_refinement() error - bcc meets none of the cases')
 
-    return om.BaseHandle(-1), SuperVertex()
+    return handle, scc
 
 def insert_inner_vertex(omesh, vertices, fh, sv_new):
     # vertex insert (vertex list and omesh)
@@ -393,23 +457,21 @@ def insert_inner_vertex(omesh, vertices, fh, sv_new):
     p2 = sv_from_vh(omesh, vh2).UV_vec2()
     p_new = sv_new.UV_vec2()
 
-    orient0 = wrapper.orientation_fast(tuple(p0), tuple(p1), tuple(p_new))
-    orient1 = wrapper.orientation_fast(tuple(p1), tuple(p2), tuple(p_new))
-    orient2 = wrapper.orientation_fast(tuple(p2), tuple(p0), tuple(p_new))
+    ori0, ori1, ori2 = orientations(p0, p1, p2, p_new)
 
-    if np.allclose(orient0, 0.0): # p0, p1 and p_new are colinear
-        assert orient1 > 0.0
-        assert orient2 > 0.0
+    if np.allclose(ori0, 0.0): # p0, p1 and p_new are colinear
+        assert ori1 > 0.0
+        assert ori2 > 0.0
         omesh.split_edge(omesh.edge_handle(hh0), vh_new)
-    elif np.allclose(orient1, 0.0): # p1, p2 and p_new are colinear
-        assert orient2 > 0.0
+    elif np.allclose(ori1, 0.0): # p1, p2 and p_new are colinear
+        assert ori2 > 0.0
         omesh.split_edge(omesh.edge_handle(hh1), vh_new)
-    elif np.allclose(orient2, 0.0): # p2, p0 and p_new are colinear
+    elif np.allclose(ori2, 0.0): # p2, p0 and p_new are colinear
         omesh.split_edge(omesh.edge_handle(hh2), vh_new)
     else:
-        assert orient0 > 0.0
-        assert orient1 > 0.0
-        assert orient2 > 0.0
+        assert ori0 > 0.0
+        assert ori1 > 0.0
+        assert ori2 > 0.0
         om.TriMesh.split(omesh, fh, vh_new)
 
     omesh.garbage_collection()

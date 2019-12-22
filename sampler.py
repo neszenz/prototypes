@@ -35,7 +35,7 @@ NUMBER_OF_SAMPLES = 10 # only for SIMPLE sampling method
 INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
 REMOVE_SINGULARITIES = True
-SIMPLIFY_LINEAR_SEGMENTS = False
+SIMPLIFY_LINEAR_EDGES = False
 
 # __main__ config
 INPUT_PATH = paths.STEP_42
@@ -185,7 +185,7 @@ def edge_sampler_simple(edge_info, face, shape_maps):
     if REMOVE_SINGULARITIES:
         remove_singularities(edge_mesh)
 
-    if SIMPLIFY_LINEAR_SEGMENTS:
+    if SIMPLIFY_LINEAR_EDGES:
         simplify_linear_segments(edge_mesh, derivatives)
 
     # here, the edges orientation are made consistent with that of the wire
