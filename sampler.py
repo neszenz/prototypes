@@ -32,6 +32,7 @@ class SAMPLER_TYPES: # enum for calling sampler factory
 
 SAMPLER_TYPE = SAMPLER_TYPES.SIMPLE
 NUMBER_OF_SAMPLES = 10 # only for SIMPLE sampling method
+MIN_NUMBER_OF_SAMPLES = 3 # prevent multiple shared edges when edes get simplified
 INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
 REMOVE_SINGULARITIES = True
@@ -128,7 +129,7 @@ def edge_sampler_simple(edge_info, face, shape_maps):
         sv = SuperVertex(x=p3d.X(), y=p3d.Y(), z=p3d.Z(), u=p2d.X(), v=p2d.Y())
 
         return sv
-    def remove_singularities(edge_mesh):
+    def remove_singularities(edge_mesh, derivatives):
         sv_index = 1
         while sv_index < len(edge_mesh):
             sv_last = edge_mesh[sv_index-1]
@@ -136,6 +137,7 @@ def edge_sampler_simple(edge_info, face, shape_maps):
 
             if np.allclose(sv_last.XYZ_vec3(), sv_curr.XYZ_vec3()):
                 del edge_mesh[sv_index]
+                del derivatives[sv_index]
             else:
                 sv_index += 1
 
@@ -144,7 +146,7 @@ def edge_sampler_simple(edge_info, face, shape_maps):
         assert len(edge_mesh) == len(derivatives)
 
         i = 1
-        while i+1 < len(edge_mesh):
+        while i+1 < len(edge_mesh) and len(edge_mesh) >= MIN_NUMBER_OF_SAMPLES+1:
             d_last = derivatives[i-1]
             d_curr = derivatives[i]
             d_next = derivatives[i+1]
@@ -162,7 +164,7 @@ def edge_sampler_simple(edge_info, face, shape_maps):
     edge_mesh = []
     derivatives = []
 
-    if NUMBER_OF_SAMPLES < 2:
+    if NUMBER_OF_SAMPLES < MIN_NUMBER_OF_SAMPLES:
         return edge_mesh
 
     surface, curve2d, curve3d, fp, lp, p_length = collect_interface(edge, face)
@@ -183,7 +185,7 @@ def edge_sampler_simple(edge_info, face, shape_maps):
         edge_mesh.append(sv)
 
     if REMOVE_SINGULARITIES:
-        remove_singularities(edge_mesh)
+        remove_singularities(edge_mesh, derivatives)
 
     if SIMPLIFY_LINEAR_EDGES:
         simplify_linear_segments(edge_mesh, derivatives)
@@ -209,7 +211,7 @@ def sample_edges_in_framework(framework, shape_maps):
             else:
                 pass #TODO different sampler methods
 
-            if len(edge_mesh) >= 2:
+            if len(edge_mesh) >= MIN_NUMBER_OF_SAMPLES:
                 edge_mesh_loop.append(edge_mesh)
 
         # merge edge meshes together into a wire vertex loop
