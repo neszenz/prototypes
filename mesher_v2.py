@@ -362,6 +362,9 @@ def travel(omesh, hh, p_orig, c_2d):
 
         ori0, ori1, ori2 = orientations(p0, p1, p2, p)
 
+        if np.allclose(ori0, 0.0) or np.allclose(ori1, 0.0) or np.allclose(ori2, 0.0):
+            return False
+
         if ori0 > 0.0 and ori1 > 0.0 and ori2 > 0.0:
             return True
 
@@ -369,7 +372,7 @@ def travel(omesh, hh, p_orig, c_2d):
     p_orig = tuple(p_orig)
     c_2d = tuple(c_2d)
 
-    while not omesh.is_boundary(hh):
+    while not omesh.is_boundary(omesh.edge_handle(hh)):
         hh = omesh.opposite_halfedge_handle(hh)
         fh = omesh.face_handle(hh)
 
@@ -416,20 +419,17 @@ def calculate_refinement(omesh, delta):
     # none of the simple cases are met; we need to invoke the travel algorithm
     if bx < 0.0:
         if USE_TRAVEL_TEST:
-            p_orig = svA.UV_vec2()
-            handle = travel(omesh, hha, p_orig, scc.UV_vec2())
+            handle = travel(omesh, hha, svA.UV_vec2(), scc.UV_vec2())
         else:
             handle = omesh.edge_handle(hha)
     elif by < 0.0:
         if USE_TRAVEL_TEST:
-            p_orig = svB.UV_vec2()
-            handle = travel(omesh, hhb, p_orig, scc.UV_vec2())
+            handle = travel(omesh, hhb, svB.UV_vec2(), scc.UV_vec2())
         else:
             handle = omesh.edge_handle(hhb)
     elif bz < 0.0:
         if USE_TRAVEL_TEST:
-            p_orig = svC.UV_vec2()
-            handle = travel(omesh, hhc, p_orig, scc.UV_vec2())
+            handle = travel(omesh, hhc, svC.UV_vec2(), scc.UV_vec2())
         else:
             handle = omesh.edge_handle(hhc)
     else:
@@ -462,12 +462,15 @@ def insert_inner_vertex(omesh, vertices, fh, sv_new):
     if np.allclose(ori0, 0.0): # p0, p1 and p_new are colinear
         assert ori1 > 0.0
         assert ori2 > 0.0
-        omesh.split_edge(omesh.edge_handle(hh0), vh_new)
+        eh = omesh.edge_handle(hh0)
+        omesh.split_edge(eh, vh_new)
     elif np.allclose(ori1, 0.0): # p1, p2 and p_new are colinear
         assert ori2 > 0.0
-        omesh.split_edge(omesh.edge_handle(hh1), vh_new)
+        eh = omesh.edge_handle(hh1)
+        omesh.split_edge(eh, vh_new)
     elif np.allclose(ori2, 0.0): # p2, p0 and p_new are colinear
-        omesh.split_edge(omesh.edge_handle(hh2), vh_new)
+        eh = omesh.edge_handle(hh2)
+        omesh.split_edge(eh, vh_new)
     else:
         assert ori0 > 0.0
         assert ori1 > 0.0
@@ -517,7 +520,7 @@ def split_edge(omesh, vertices, eh):
                     return True
 
             return False
-        phw = np.array((omesh.point(vhhw)))
+        phw = np.array((omesh.point(vh)))
 
         while remove_one_encroaching_vertex(omesh, vertices, phw, h):
             continue
@@ -529,24 +532,23 @@ def split_edge(omesh, vertices, eh):
     sv0 = sv_from_vh(omesh, vh0)
     sv1 = sv_from_vh(omesh, vh1)
 
-    # calculate halfway vertex
     if omesh.is_boundary(eh):
-        svhw = SuperVertex.compute_halfway_on_shared_edge(sv0, sv1)
+        sv_new = SuperVertex.compute_halfway_on_shared_edge(sv0, sv1)
     else:
-        svhw = SuperVertex.compute_halfway(sv0, sv1)
+        sv_new = SuperVertex.compute_halfway(sv0, sv1)
 
-    vertices.append(svhw)
+    vertices.append(sv_new)
 
     # split segment
-    vhhw = omesh.add_vertex(svhw.XYZ_vec3())
-    set_supervertex_property(omesh, vhhw, svhw)
-    omesh.split_edge(eh, vhhw)
+    vh_new = omesh.add_vertex(sv_new.XYZ_vec3())
+    set_supervertex_property(omesh, vh_new, sv_new)
+    omesh.split_edge(eh, vh_new)
     omesh.garbage_collection()
 
     # remove encroaching vertices
     if omesh.is_boundary(eh):
-        h = np.linalg.norm(svhw.XYZ_vec3() - sv0.XYZ_vec3())
-        remove_encroaching_vertices(omesh, vertices, vhhw, h)
+        h = np.linalg.norm(sv_new.XYZ_vec3() - sv0.XYZ_vec3())
+        remove_encroaching_vertices(omesh, vertices, vh_new, h)
 
     return
 
