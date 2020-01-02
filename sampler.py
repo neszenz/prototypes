@@ -37,6 +37,7 @@ INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
 REMOVE_SINGULARITIES = True
 SIMPLIFY_LINEAR_EDGES = False
+REORDER_WIRES_FOR_CLOSEST_ENDPOINTS = True
 
 # __main__ config
 INPUT_PATH = paths.STEP_42
@@ -197,6 +198,29 @@ def edge_sampler_simple(edge_info, face, shape_maps):
     return edge_mesh
 def sample_edges_in_framework(framework, shape_maps):
     def add_wire(face_mesh, wire_framework, shape_maps):
+        def order_edge_meshes(edge_mesh_loop):
+            new_edge_mesh_loop = []
+
+            new_edge_mesh_loop.append(edge_mesh_loop[0])
+            del edge_mesh_loop[0]
+
+            # always append edge mesh with closest start point
+            while len(edge_mesh_loop) > 0:
+                curr_em = new_edge_mesh_loop[-1]
+                clos_i = -1
+                clos_dist = float('inf')
+
+                for i in range(len(edge_mesh_loop)):
+                    tmp_em = edge_mesh_loop[i]
+                    tmp_dist = np.linalg.norm(curr_em[-1].XYZ_vec3() - tmp_em[0].XYZ_vec3())
+                    if tmp_dist < clos_dist:
+                        clos_i = i
+                        clos_dist = tmp_dist
+
+                new_edge_mesh_loop.append(edge_mesh_loop[clos_i])
+                del edge_mesh_loop[clos_i]
+
+            return new_edge_mesh_loop
         vertices, wire_meshes, _, face = face_mesh
 
         wire_vertices = []
@@ -214,25 +238,28 @@ def sample_edges_in_framework(framework, shape_maps):
             if len(edge_mesh) >= MIN_NUMBER_OF_SAMPLES:
                 edge_mesh_loop.append(edge_mesh)
 
+        # repair certain cases of degenerated order and geometry of wires
+        if REORDER_WIRES_FOR_CLOSEST_ENDPOINTS:
+            edge_mesh_loop = order_edge_meshes(edge_mesh_loop)
+
         # merge edge meshes together into a wire vertex loop
         for i in range(len(edge_mesh_loop)):
             curr_em = edge_mesh_loop[i]
             next_em = edge_mesh_loop[(i+1) % len(edge_mesh_loop)]
-            if np.allclose(curr_em[-1].XYZ_vec3(), next_em[0].XYZ_vec3()):
-                assert not curr_em[-1].edges_with_p is None
-                assert not next_em[0].edges_with_p is None
-                assert len(curr_em[-1].edges_with_p) == 1
-                assert len(next_em[0].edges_with_p) == 1
 
-                # merge edge list in connection and insert current into wire_mesh
-                next_em[0].edges_with_p = curr_em[-1].edges_with_p + next_em[0].edges_with_p
-                curr_em.pop()
+            assert not curr_em[-1].edges_with_p is None
+            assert not next_em[0].edges_with_p is None
+            assert len(curr_em[-1].edges_with_p) == 1
+            assert len(next_em[0].edges_with_p) == 1
 
-                wire_vertices += curr_em
-            else:
-                print('sample_edges_in_framework() error - wire connectivity degenerated')
-                wire_vertices += curr_em
-                return
+            if not np.allclose(curr_em[-1].XYZ_vec3(), next_em[0].XYZ_vec3()):
+                print('sample_edges_in_framework() warning - wire connectivity may be degenerated')
+
+            # merge edge list in connection and insert current into wire_mesh
+            next_em[0].edges_with_p = curr_em[-1].edges_with_p + next_em[0].edges_with_p
+            curr_em.pop()
+
+            wire_vertices += curr_em
 
         # construct indexed wire mesh
         offset = len(vertices)
