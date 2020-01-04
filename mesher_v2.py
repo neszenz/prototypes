@@ -30,12 +30,14 @@ sampler.INCLUDE_INNER_WIRES = True
 sampler.SIMPLIFY_LINEAR_EDGES = False
 SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = float('inf')
-MAX_ITERATIONS = -1 # -1 for unlimited
+MAX_ITERATIONS = 12 # -1 for unlimited
 USE_TRAVEL_TEST = True
 
 # __main__ config
-INPUT_PATH = paths.STEP_SPHERE
+INPUT_PATH = paths.STEP_SURFFIL
 OUTPUT_DIR = paths.DIR_TMP
+
+DEBUG_VERTICES = [] #TODO remove
 
 def triangulate_dt(vertices):
     triangles = []
@@ -329,7 +331,8 @@ def calculate_bcc(A, B, C):
     return np.array((bx, by, bz))
 
 def cartesian_from_barycentric(p0, p1, p2, bx, by, bz):
-    return (bx*p0 + by*p1 + bz*p2) / (bx+by+bz)
+    cartesian = (bx*p0 + by*p1 + bz*p2) / (bx+by+bz)
+    return np.array(cartesian)
 
 #TODO correct approxcimation by normal convergence
 # calculate surface circumcenter based on circumcenter in barycentric coordinates
@@ -345,6 +348,31 @@ def scc_from_bcc(sv0, sv1, sv2, bcc):
 
     return scc
 
+# while the cc in 3d can be calc. exactly, for the 2d ones only possible candidates can be given
+def circumcenters_from_bcc(svA, svB, svC, bcc):
+    def array_from_inter(inter, i):
+        u = inter.UParameter(i)
+        v = inter.VParameter(i)
+        return np.array((u, v))
+    a = svA.XYZ_vec3()
+    b = svB.XYZ_vec3()
+    c = svC.XYZ_vec3()
+
+    c_3d = cartesian_from_barycentric(svA.XYZ_vec3(), svB.XYZ_vec3(), svC.XYZ_vec3(), *bcc)
+    n = normalize(np.cross(b-a, c-a))
+
+    center_line = gp_Lin(gp_Pnt(c_3d[0], c_3d[1], c_3d[2]), gp_Dir(n[0], n[1], n[2]))
+
+    inter = IntCurvesFace_Intersector(svA.face, 0.0001)
+    inter.Perform(center_line, -float('inf'), float('inf'))
+
+    if inter.IsDone():
+        occ_offset = 1 # occ indices start at 1
+        c_2d_candidates =  [array_from_inter(inter, i+occ_offset) for i in range(inter.NbPnt())]
+        return c_2d_candidates, c_3d, n
+    else:
+        raise Exception('calculate_surface_circumcenter() error - intersector not done')
+
 # for triangle p0-p1-p2 returns orientation test results of all three edges with px
 def orientations(p0, p1, p2, px):
     ori0 = wrapper.orientation_fast(tuple(p0), tuple(p1), tuple(px))
@@ -353,7 +381,7 @@ def orientations(p0, p1, p2, px):
 
     return ori0, ori1, ori2
 
-def travel(omesh, hh, p_orig, c_2d):
+def find_point_inside(omesh, fh, points):
     def lies_inside(omesh, fh, p):
         sv0, sv1, sv2 = collect_triangle_supervertices(omesh, fh)
         p0 = tuple(sv0.UV_vec2())
@@ -369,28 +397,102 @@ def travel(omesh, hh, p_orig, c_2d):
             return True
 
         return False
-    p_orig = tuple(p_orig)
-    c_2d = tuple(c_2d)
+    for i in range(len(points)):
+        if lies_inside(omesh, fh, points[i]):
+            return i
 
+    return -1
+
+def scc_from_c_2d(c_2d, other_sv):
+    scc = SuperVertex(u=c_2d[0], v=c_2d[1])
+    scc.face = other_sv.face
+    scc.face_id = other_sv.face_id
+    scc.project_to_XYZ()
+
+    return scc
+
+#TODO
+def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal):
+    def halfedge_intersects_ray_shadow(omesh, hh, p_orig, ray_dir, normal): #TODO test/ fix
+        print('halfedge_intersects_ray_shadow()')
+        assert np.allclose(np.linalg.norm(ray_dir), 1.0)
+        assert np.allclose(np.linalg.norm(normal), 1.0)
+        p_from = sv_from_vh(omesh, omesh.from_vertex_handle(hh)).XYZ_vec3()
+        p_to = sv_from_vh(omesh, omesh.to_vertex_handle(hh)).XYZ_vec3()
+
+        # to simplify, move ray origin to system origin
+        p0 = p_from - p_orig
+        p1 = p_to - p_orig
+
+        # run binary search until we converge to machine percision
+        while not np.allclose(np.linalg.norm(p1-p0), 0.0):
+            ph = p0 + ((p1-p0) * 0.5)
+            #TODO remove
+            global DEBUG_VERTICES
+            x, y, z = ph + p_orig
+            DEBUG_VERTICES.append(SuperVertex(x, y, z))
+            #TODO remove
+
+            d0 = project_point_onto_normalized_vector(p0, ray_dir)
+            d1 = project_point_onto_normalized_vector(p1, ray_dir)
+            dh = project_point_onto_normalized_vector(ph, ray_dir)
+            #TODO remove
+            x, y, z = d0 + p_orig
+            DEBUG_VERTICES.append(SuperVertex(x, y, z))
+            x, y, z = d1 + p_orig
+            DEBUG_VERTICES.append(SuperVertex(x, y, z))
+            x, y, z = dh + p_orig
+            DEBUG_VERTICES.append(SuperVertex(x, y, z))
+            #TODO remove
+            dp0 = p0 - d0
+            dp1 = p1 - d1
+            dph = ph - dh
+
+            # angle0 = calculate_angle_between_vectors(dp0, normal)
+            # angle1 = calculate_angle_between_vectors(dp1, normal)
+            # angleh = calculate_angle_between_vectors(dph, normal)
+            error0h = np.abs(np.linalg.norm(dph) - np.linalg.norm(dp0))
+            error1h = np.abs(np.linalg.norm(dph) - np.linalg.norm(dp1))
+
+            # error0h = np.abs(angleh - angle0)
+            # error1h = np.abs(angleh - angle1)
+
+            if error0h > error1h:
+                p0 = ph
+            else:
+                p1 = ph
+
+        p_result = p0 + p_orig
+
+        assert not np.allclose(np.linalg.norm(p_from - p_result), 0.0)
+
+        if np.allclose(np.linalg.norm(p_to - p_result), 0.0):
+            print('False')
+            return False
+        else:
+            print('True')
+            return True
+    p_orig = sv_orig.XYZ_vec3()
+    ray_dir = normalize(c_3d - p_orig)
+
+    # halt if we encounter a boundary edge (split case)
     while not omesh.is_boundary(omesh.edge_handle(hh)):
         hh = omesh.opposite_halfedge_handle(hh)
         fh = omesh.face_handle(hh)
 
-        if lies_inside(omesh, fh, c_2d):
-            return fh
+        # halt if surface circumcenter is found to be insides fh (insert case)
+        inside_index = find_point_inside(omesh, fh, c_2d_candidates)
+        if inside_index >= 0:
+            return fh, scc_from_c_2d(c_2d_candidates[inside_index], sv_orig)
 
         # which of the remaining edges is crossed to travel further in that direction
         hh = omesh.next_halfedge_handle(hh)
-        vh_opposite = omesh.to_vertex_handle(hh)
-        p_opposite = tuple(sv_from_vh(omesh, vh_opposite).UV_vec2())
-        ori = wrapper.orientation_fast(p_orig, c_2d, p_opposite)
-        assert ori != 0.0
-
-        if ori < 0.0: # if orientation is clockwise
-            # select other edge, because line between p_orig and c_2d passes the other side
+        if not halfedge_intersects_ray_shadow(omesh, hh, p_orig, ray_dir, normal):
+            # shadow apparently crossed the other edge
             hh = omesh.next_halfedge_handle(hh)
+            assert halfedge_intersects_ray_shadow(omesh, hh, p_orig, ray_dir, normal) #TODO remove after testing
 
-    return omesh.edge_handle(hh)
+    return omesh.edge_handle(hh), None
 
 def calculate_refinement(omesh, delta):
     hhc = omesh.halfedge_handle(delta)
@@ -411,27 +513,41 @@ def calculate_refinement(omesh, delta):
     if np.allclose(bz, 0.0):
         return omesh.edge_handle(hhc), None
 
-    scc = scc_from_bcc(svA, svB, svC, bcc)
+    # scc_approx = scc_from_bcc(svA, svB, svC, bcc)
+    c_2d_candidates, c_3d, normal = circumcenters_from_bcc(svA, svB, svC, bcc)
 
+    inside_index = find_point_inside(omesh, delta, c_2d_candidates)
+    if inside_index >= 0:
+        return delta, scc_from_c_2d(c_2d_candidates[inside_index], svA)
     if all(bcc > 0.0):
-        return delta, scc
+        for c_2d in c_2d_candidates:
+            tmp = SuperVertex(u=c_2d[0], v=c_2d[1])
+            tmp.face = svA.face
+            tmp.face_id = svA.face_id
+            tmp.project_to_XYZ()
+            global DEBUG_VERTICES
+            DEBUG_VERTICES.append(tmp)
+        return delta, scc_from_bcc(svA, svB, svC, bcc)
+    assert not all(bcc > 0.0)
+    # if all(bcc > 0.0):
+        # return delta, scc_approx
 
     # none of the simple cases are met; we need to invoke the travel algorithm
     if bx < 0.0:
         if USE_TRAVEL_TEST:
-            handle = travel(omesh, hha, svA.UV_vec2(), scc.UV_vec2())
+            handle, scc = travel(omesh, delta, hha, svA, c_3d, c_2d_candidates, normal)
         else:
-            handle = omesh.edge_handle(hha)
+            handle, scc = omesh.edge_handle(hha), scc_approx
     elif by < 0.0:
         if USE_TRAVEL_TEST:
-            handle = travel(omesh, hhb, svB.UV_vec2(), scc.UV_vec2())
+            handle, scc = travel(omesh, delta, hhb, svB, c_3d, c_2d_candidates, normal)
         else:
-            handle = omesh.edge_handle(hhb)
+            handle, scc = omesh.edge_handle(hhb), scc_approx
     elif bz < 0.0:
         if USE_TRAVEL_TEST:
-            handle = travel(omesh, hhc, svC.UV_vec2(), scc.UV_vec2())
+            handle, scc = travel(omesh, delta, hhc, svC, c_3d, c_2d_candidates, normal)
         else:
-            handle = omesh.edge_handle(hhc)
+            handle, scc = omesh.edge_handle(hhc), scc_approx
     else:
         raise Exception('calculate_refinement() error - bcc meets none of the cases')
 
@@ -608,6 +724,7 @@ def chew93_Surface(face_mesh):
         iter_counter += 1
 
     parse_back(omesh, face_mesh)
+    # vertices += DEBUG_VERTICES #TODO remove
 
     return
 
@@ -627,6 +744,7 @@ def triangulate(path):
 if __name__ == '__main__':
     TMP2 = False
     for TMP in range(1):
+        # MAX_ITERATIONS = TMP
         mesh = triangulate(INPUT_PATH)
         TMP2 = False
         write_to_file(mesh, OUTPUT_DIR)
