@@ -36,3 +36,5 @@ def left_hand_perpendicular(v):
     assert len(v) == 2
     return np.array((v[1], -v[0]))
 
+def project_point_onto_normalized_vector(p, v):
+    return np.dot(p, v) * v
