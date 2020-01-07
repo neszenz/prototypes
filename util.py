@@ -38,3 +38,18 @@ def left_hand_perpendicular(v):
 
 def project_point_onto_normalized_vector(p, v):
     return np.dot(p, v) * v
+
+# assuming all arguments are numpy arrays and the directions are normalized
+def shortest_vector_between_two_lines(line0_ori, line0_dir, line1_ori, line1_dir):
+    # set up and solve linear equation
+    closest_connection_dir = np.cross(line0_dir, line1_dir)
+    A = np.array([line0_dir, -line1_dir, closest_connection_dir]).T
+    B = line1_ori - line0_ori
+    x = np.linalg.solve(A, B)
+
+    # calculate closest points
+    line0_fact, line1_fact, connection_fact = x
+    p0 = line0_ori + (line0_fact * line0_dir)
+    p1 = line1_ori + (line1_fact * line1_dir)
+
+    return p1 - p0
