@@ -1,5 +1,7 @@
 import numpy as np
 
+from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
+
 def normalize(vector):
     vNorm = np.linalg.norm(vector)
     if vNorm == 0.0:
@@ -53,3 +55,7 @@ def shortest_vector_between_two_lines(line0_ori, line0_dir, line1_ori, line1_dir
     p1 = line1_ori + (line1_fact * line1_dir)
 
     return p1 - p0
+
+def reverse_u(u, face):
+    last_u_parameter = BRepAdaptor_Surface(face).LastUParameter()
+    return last_u_parameter - u

@@ -23,6 +23,7 @@ from util import *
 from OCC.Core.gp import gp_Pnt, gp_Dir, gp_Lin
 from OCC.Core.IntCurvesFace import IntCurvesFace_Intersector
 from OCC.Core.TopAbs import TopAbs_ON, TopAbs_IN
+from OCC.Core.TopAbs import TopAbs_REVERSED
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 sampler.NUMBER_OF_SAMPLES = 10
@@ -30,11 +31,11 @@ sampler.INCLUDE_INNER_WIRES = True
 sampler.SIMPLIFY_LINEAR_EDGES = False
 SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = float('inf')
-MAX_ITERATIONS = 1 # -1 for unlimited
+MAX_ITERATIONS = -1 # -1 for unlimited
 USE_TRAVEL_TEST = True
 
 # __main__ config
-INPUT_PATH = paths.STEP_BOX
+INPUT_PATH = paths.STEP_TEST1
 OUTPUT_DIR = paths.DIR_TMP
 
 DEBUG_VERTICES = [] #TODO remove
@@ -367,10 +368,10 @@ def calculate_circumcenter_3d(A, B, C):
 
 # while the cc in 3d can be calc. exactly, for the 2d ones only possible candidates can be given
 def calculate_circumcenter_2d_candidates(c_3d, n, face):
-    def tuple_from_inter(inter, i):
+    def array_from_inter(inter, i):
         u = inter.UParameter(i)
         v = inter.VParameter(i)
-        return (u, v)
+        return np.array((u, v))
     center_line = gp_Lin(gp_Pnt(c_3d[0], c_3d[1], c_3d[2]), gp_Dir(n[0], n[1], n[2]))
 
     inter = IntCurvesFace_Intersector(face, 0.0001)
@@ -378,7 +379,11 @@ def calculate_circumcenter_2d_candidates(c_3d, n, face):
 
     if inter.IsDone():
         occ_offset = 1 # occ indices start at 1
-        c_2d_candidates =  [tuple_from_inter(inter, i+occ_offset) for i in range(inter.NbPnt())]
+        c_2d_candidates = [array_from_inter(inter, i+occ_offset) for i in range(inter.NbPnt())]
+        if face.Orientation() == TopAbs_REVERSED:
+            for c_2d in c_2d_candidates:
+                # reverse u axis for reversed faces
+                c_2d[0] = reverse_u(c_2d[0], face)
         return c_2d_candidates
     else:
         raise Exception('calculate_surface_circumcenter() error - intersector not done')
@@ -401,7 +406,7 @@ def find_point_inside(omesh, fh, points):
         ori0, ori1, ori2 = orientations(p0, p1, p2, p)
 
         if np.allclose(ori0, 0.0) or np.allclose(ori1, 0.0) or np.allclose(ori2, 0.0):
-            return False
+            return True
 
         if ori0 > 0.0 and ori1 > 0.0 and ori2 > 0.0:
             return True
@@ -422,8 +427,8 @@ def scc_from_c_2d(c_2d, other_sv):
     return scc
 
 def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal):
-    def halfedge_crossed_by_ray_shadow(omesh, hh, ray_ori, ray_dir, normal): #TODO test/ fix
-        print('halfedge_crossed_by_ray_shadow()')
+    def halfedge_crossed_by_ray_shadow(omesh, hh, ray_ori, ray_dir, normal):
+        print('halfedge_crossed_by_ray_shadow(): ', end='') #TODO remove
         assert np.allclose(np.linalg.norm(ray_dir), 1.0)
         assert np.allclose(np.linalg.norm(normal), 1.0)
         p_from = sv_from_vh(omesh, omesh.from_vertex_handle(hh)).XYZ_vec3()
@@ -433,6 +438,7 @@ def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal):
         v_to = shortest_vector_between_two_lines(p_to, normal, ray_ori, ray_dir)
 
         dp = np.dot(v_from, v_to)
+        print(dp < 0) #TODO remove
 
         return dp < 0
     p_orig = sv_orig.XYZ_vec3()
@@ -475,7 +481,6 @@ def calculate_refinement(omesh, delta):
     # test if surface circumcenter is in delta
     inside_index = find_point_inside(omesh, delta, c_2d_candidates)
     if inside_index >= 0:
-        print('inside')
         return delta, scc_from_c_2d(c_2d_candidates[inside_index], sv0)
 
     # it is outside -> one angle needs to be greater than the other
@@ -484,15 +489,12 @@ def calculate_refinement(omesh, delta):
     angle2 = calculate_angle_in_corner(sv1.XYZ_vec3(), sv2.XYZ_vec3(), sv0.XYZ_vec3())
 
     if angle0 > angle1 and angle0 > angle2:
-        print('angle0')
         sv_selected = sv0
         hh_selected = hh
     elif angle1 > angle0 and angle1 > angle2:
-        print('angle1')
         sv_selected = sv1
         hh_selected = omesh.next_halfedge_handle(hh)
     elif angle2 > angle0 and angle2 > angle1:
-        print('angle2')
         sv_selected = sv2
         hh_selected = omesh.prev_halfedge_handle(hh)
     else:
@@ -673,7 +675,7 @@ def chew93_Surface(face_mesh):
         iter_counter += 1
 
     parse_back(omesh, face_mesh)
-    vertices += DEBUG_VERTICES #TODO remove
+    # vertices += DEBUG_VERTICES #TODO remove
 
     return
 

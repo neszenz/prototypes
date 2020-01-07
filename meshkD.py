@@ -26,6 +26,8 @@ from OCC.Core.gp import gp_Pnt
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_Surface
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FORWARD, TopAbs_REVERSED
 
+from util import *
+
 BOUNDING_BOX_DEFAULT = (
     float('inf'), float('-inf'),
     float('inf'), float('-inf'),
@@ -122,8 +124,7 @@ class SuperVertex:
         return np.array([self.x, self.y, self.z])
 
     def reverse_u(self):
-        last_u_parameter = BRepAdaptor_Surface(self.face).LastUParameter()
-        self.u = last_u_parameter - self.u
+        self.u = reverse_u(self.u, self.face)
 
     def project_to_UV(self):
         assert self.face != None
