@@ -30,11 +30,11 @@ sampler.INCLUDE_INNER_WIRES = True
 sampler.SIMPLIFY_LINEAR_EDGES = False
 SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = float('inf')
-MAX_ITERATIONS = -1 # -1 for unlimited
+MAX_ITERATIONS = 1 # -1 for unlimited
 USE_TRAVEL_TEST = True
 
 # __main__ config
-INPUT_PATH = paths.STEP_SURFFIL
+INPUT_PATH = paths.STEP_BOX
 OUTPUT_DIR = paths.DIR_TMP
 
 DEBUG_VERTICES = [] #TODO remove
@@ -421,67 +421,20 @@ def scc_from_c_2d(c_2d, other_sv):
 
     return scc
 
-#TODO
 def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal):
-    def halfedge_intersects_ray_shadow(omesh, hh, p_orig, ray_dir, normal): #TODO test/ fix
-        print('halfedge_intersects_ray_shadow()')
+    def halfedge_crossed_by_ray_shadow(omesh, hh, ray_ori, ray_dir, normal): #TODO test/ fix
+        print('halfedge_crossed_by_ray_shadow()')
         assert np.allclose(np.linalg.norm(ray_dir), 1.0)
         assert np.allclose(np.linalg.norm(normal), 1.0)
         p_from = sv_from_vh(omesh, omesh.from_vertex_handle(hh)).XYZ_vec3()
         p_to = sv_from_vh(omesh, omesh.to_vertex_handle(hh)).XYZ_vec3()
 
-        # to simplify, move ray origin to system origin
-        p0 = p_from - p_orig
-        p1 = p_to - p_orig
+        v_from = shortest_vector_between_two_lines(p_from, normal, ray_ori, ray_dir)
+        v_to = shortest_vector_between_two_lines(p_to, normal, ray_ori, ray_dir)
 
-        # run binary search until we converge to machine percision
-        while not np.allclose(np.linalg.norm(p1-p0), 0.0):
-            ph = p0 + ((p1-p0) * 0.5)
-            #TODO remove
-            global DEBUG_VERTICES
-            x, y, z = ph + p_orig
-            DEBUG_VERTICES.append(SuperVertex(x, y, z))
-            #TODO remove
+        dp = np.dot(v_from, v_to)
 
-            d0 = project_point_onto_normalized_vector(p0, ray_dir)
-            d1 = project_point_onto_normalized_vector(p1, ray_dir)
-            dh = project_point_onto_normalized_vector(ph, ray_dir)
-            #TODO remove
-            x, y, z = d0 + p_orig
-            DEBUG_VERTICES.append(SuperVertex(x, y, z))
-            x, y, z = d1 + p_orig
-            DEBUG_VERTICES.append(SuperVertex(x, y, z))
-            x, y, z = dh + p_orig
-            DEBUG_VERTICES.append(SuperVertex(x, y, z))
-            #TODO remove
-            dp0 = p0 - d0
-            dp1 = p1 - d1
-            dph = ph - dh
-
-            # angle0 = calculate_angle_between_vectors(dp0, normal)
-            # angle1 = calculate_angle_between_vectors(dp1, normal)
-            # angleh = calculate_angle_between_vectors(dph, normal)
-            error0h = np.abs(np.linalg.norm(dph) - np.linalg.norm(dp0))
-            error1h = np.abs(np.linalg.norm(dph) - np.linalg.norm(dp1))
-
-            # error0h = np.abs(angleh - angle0)
-            # error1h = np.abs(angleh - angle1)
-
-            if error0h > error1h:
-                p0 = ph
-            else:
-                p1 = ph
-
-        p_result = p0 + p_orig
-
-        assert not np.allclose(np.linalg.norm(p_from - p_result), 0.0)
-
-        if np.allclose(np.linalg.norm(p_to - p_result), 0.0):
-            print('False')
-            return False
-        else:
-            print('True')
-            return True
+        return dp < 0
     p_orig = sv_orig.XYZ_vec3()
     ray_dir = normalize(c_3d - p_orig)
 
@@ -497,10 +450,10 @@ def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal):
 
         # which of the remaining edges is crossed to travel further in that direction
         hh = omesh.next_halfedge_handle(hh)
-        if not halfedge_intersects_ray_shadow(omesh, hh, p_orig, ray_dir, normal):
+        if not halfedge_crossed_by_ray_shadow(omesh, hh, p_orig, ray_dir, normal):
             # shadow apparently crossed the other edge
             hh = omesh.next_halfedge_handle(hh)
-            assert halfedge_intersects_ray_shadow(omesh, hh, p_orig, ray_dir, normal)
+            assert halfedge_crossed_by_ray_shadow(omesh, hh, p_orig, ray_dir, normal)
 
     return omesh.edge_handle(hh), None
 
