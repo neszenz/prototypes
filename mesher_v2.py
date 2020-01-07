@@ -30,7 +30,7 @@ sampler.INCLUDE_INNER_WIRES = True
 sampler.SIMPLIFY_LINEAR_EDGES = False
 SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = float('inf')
-MAX_ITERATIONS = 12 # -1 for unlimited
+MAX_ITERATIONS = -1 # -1 for unlimited
 USE_TRAVEL_TEST = True
 
 # __main__ config
@@ -348,28 +348,38 @@ def scc_from_bcc(sv0, sv1, sv2, bcc):
 
     return scc
 
+def calculate_circumcenter_3d(A, B, C):
+    # by 'Oscar Lanzi III' from
+    # https://sci.math.narkive.com/nJMeroLe/circumcenter-of-a-3d-triangle
+    a = np.linalg.norm(B-C)
+    b = np.linalg.norm(A-C)
+    c = np.linalg.norm(A-B)
+    a_square = a**2
+    b_square = b**2
+    c_square = c**2
+    A_comp = A*(a_square*(b_square+c_square-a_square))
+    B_comp = B*(b_square*(a_square+c_square-b_square))
+    C_comp = C*(c_square*(a_square+b_square-c_square))
+    divisor = 2*(a_square*b_square+a_square*c_square+b_square*c_square)-(a**4+b**4+c**4)
+    circumcenter = (A_comp+B_comp+C_comp) / divisor
+
+    return circumcenter
+
 # while the cc in 3d can be calc. exactly, for the 2d ones only possible candidates can be given
-def circumcenters_from_bcc(svA, svB, svC, bcc):
-    def array_from_inter(inter, i):
+def calculate_circumcenter_2d_candidates(c_3d, n, face):
+    def tuple_from_inter(inter, i):
         u = inter.UParameter(i)
         v = inter.VParameter(i)
-        return np.array((u, v))
-    a = svA.XYZ_vec3()
-    b = svB.XYZ_vec3()
-    c = svC.XYZ_vec3()
-
-    c_3d = cartesian_from_barycentric(svA.XYZ_vec3(), svB.XYZ_vec3(), svC.XYZ_vec3(), *bcc)
-    n = normalize(np.cross(b-a, c-a))
-
+        return (u, v)
     center_line = gp_Lin(gp_Pnt(c_3d[0], c_3d[1], c_3d[2]), gp_Dir(n[0], n[1], n[2]))
 
-    inter = IntCurvesFace_Intersector(svA.face, 0.0001)
+    inter = IntCurvesFace_Intersector(face, 0.0001)
     inter.Perform(center_line, -float('inf'), float('inf'))
 
     if inter.IsDone():
         occ_offset = 1 # occ indices start at 1
-        c_2d_candidates =  [array_from_inter(inter, i+occ_offset) for i in range(inter.NbPnt())]
-        return c_2d_candidates, c_3d, n
+        c_2d_candidates =  [tuple_from_inter(inter, i+occ_offset) for i in range(inter.NbPnt())]
+        return c_2d_candidates
     else:
         raise Exception('calculate_surface_circumcenter() error - intersector not done')
 
@@ -490,66 +500,52 @@ def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal):
         if not halfedge_intersects_ray_shadow(omesh, hh, p_orig, ray_dir, normal):
             # shadow apparently crossed the other edge
             hh = omesh.next_halfedge_handle(hh)
-            assert halfedge_intersects_ray_shadow(omesh, hh, p_orig, ray_dir, normal) #TODO remove after testing
+            assert halfedge_intersects_ray_shadow(omesh, hh, p_orig, ray_dir, normal)
 
     return omesh.edge_handle(hh), None
 
 def calculate_refinement(omesh, delta):
-    hhc = omesh.halfedge_handle(delta)
-    hha = omesh.next_halfedge_handle(hhc)
-    hhb = omesh.next_halfedge_handle(hha)
-    svA = sv_from_vh(omesh, omesh.from_vertex_handle(hhc))
-    svB = sv_from_vh(omesh, omesh.from_vertex_handle(hha))
-    svC = sv_from_vh(omesh, omesh.from_vertex_handle(hhb))
+    hh = omesh.halfedge_handle(delta)
+    vh0 = omesh.from_vertex_handle(hh)
+    vh1 = omesh.to_vertex_handle(hh)
+    hh = omesh.next_halfedge_handle(hh) # hh is now opposite of vh0
+    vh2 = omesh.to_vertex_handle(hh)
 
-    bcc = calculate_bcc(svA.XYZ_vec3(), svB.XYZ_vec3(), svC.XYZ_vec3())
-    bx, by, bz = bcc
+    sv0 = sv_from_vh(omesh, vh0)
+    sv1 = sv_from_vh(omesh, vh1)
+    sv2 = sv_from_vh(omesh, vh2)
 
-    # based on how barycentric coordinates work, we can first test for simple cases
-    if np.allclose(bx, 0.0):
-        return omesh.edge_handle(hha), None
-    if np.allclose(by, 0.0):
-        return omesh.edge_handle(hhb), None
-    if np.allclose(bz, 0.0):
-        return omesh.edge_handle(hhc), None
+    normal = calculate_normal_normalized(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+    c_3d = calculate_circumcenter_3d(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+    c_2d_candidates = calculate_circumcenter_2d_candidates(c_3d, normal, sv0.face)
 
-    # scc_approx = scc_from_bcc(svA, svB, svC, bcc)
-    c_2d_candidates, c_3d, normal = circumcenters_from_bcc(svA, svB, svC, bcc)
-
+    # test if surface circumcenter is in delta
     inside_index = find_point_inside(omesh, delta, c_2d_candidates)
     if inside_index >= 0:
-        return delta, scc_from_c_2d(c_2d_candidates[inside_index], svA)
-    if all(bcc > 0.0):
-        for c_2d in c_2d_candidates:
-            tmp = SuperVertex(u=c_2d[0], v=c_2d[1])
-            tmp.face = svA.face
-            tmp.face_id = svA.face_id
-            tmp.project_to_XYZ()
-            global DEBUG_VERTICES
-            DEBUG_VERTICES.append(tmp)
-        return delta, scc_from_bcc(svA, svB, svC, bcc)
-    assert not all(bcc > 0.0)
-    # if all(bcc > 0.0):
-        # return delta, scc_approx
+        print('inside')
+        return delta, scc_from_c_2d(c_2d_candidates[inside_index], sv0)
 
-    # none of the simple cases are met; we need to invoke the travel algorithm
-    if bx < 0.0:
-        if USE_TRAVEL_TEST:
-            handle, scc = travel(omesh, delta, hha, svA, c_3d, c_2d_candidates, normal)
-        else:
-            handle, scc = omesh.edge_handle(hha), scc_approx
-    elif by < 0.0:
-        if USE_TRAVEL_TEST:
-            handle, scc = travel(omesh, delta, hhb, svB, c_3d, c_2d_candidates, normal)
-        else:
-            handle, scc = omesh.edge_handle(hhb), scc_approx
-    elif bz < 0.0:
-        if USE_TRAVEL_TEST:
-            handle, scc = travel(omesh, delta, hhc, svC, c_3d, c_2d_candidates, normal)
-        else:
-            handle, scc = omesh.edge_handle(hhc), scc_approx
+    # it is outside -> one angle needs to be greater than the other
+    angle0 = calculate_angle_in_corner(sv2.XYZ_vec3(), sv0.XYZ_vec3(), sv1.XYZ_vec3())
+    angle1 = calculate_angle_in_corner(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+    angle2 = calculate_angle_in_corner(sv1.XYZ_vec3(), sv2.XYZ_vec3(), sv0.XYZ_vec3())
+
+    if angle0 > angle1 and angle0 > angle2:
+        print('angle0')
+        sv_selected = sv0
+        hh_selected = hh
+    elif angle1 > angle0 and angle1 > angle2:
+        print('angle1')
+        sv_selected = sv1
+        hh_selected = omesh.next_halfedge_handle(hh)
+    elif angle2 > angle0 and angle2 > angle1:
+        print('angle2')
+        sv_selected = sv2
+        hh_selected = omesh.prev_halfedge_handle(hh)
     else:
-        raise Exception('calculate_refinement() error - bcc meets none of the cases')
+        raise Exception('calculate_refinement() error - neither inside nor outside')
+
+    handle, scc = travel(omesh, delta, hh_selected, sv_selected, c_3d, c_2d_candidates, normal)
 
     return handle, scc
 
@@ -724,7 +720,7 @@ def chew93_Surface(face_mesh):
         iter_counter += 1
 
     parse_back(omesh, face_mesh)
-    # vertices += DEBUG_VERTICES #TODO remove
+    vertices += DEBUG_VERTICES #TODO remove
 
     return
 
