@@ -9,18 +9,16 @@ def normalize(vector):
     else:
         return vector / vNorm
 
-def calculate_angle_in_corner(p0, p1, p2):
-    p10 = normalize(p0 - p1)
-    p12 = normalize(p2 - p1)
-
-    dp = max(-1.0, min(1.0, np.dot(p10, p12)))
-
-    return np.arccos(dp)
-
 def calculate_angle_between_vectors(v0, v1):
     dp = max(-1.0, min(1.0, np.dot(v0, v1)))
 
     return np.arccos(dp)
+
+def calculate_angle_in_corner(p0, p1, p2):
+    p10 = normalize(p0 - p1)
+    p12 = normalize(p2 - p1)
+
+    return calculate_angle_between_vectors(p10, p12)
 
 def calculate_normal(p0, p1, p2):
     p10 = p0 - p1

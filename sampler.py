@@ -96,7 +96,7 @@ def generate_mesh_framework(compound, shape_maps):
     print(',', ex.number_of_edges(), 'edges')
     cnt = 1 #TODO used for testing
     for face in ex.faces():
-        if cnt != 1: #TODO used for testing
+        if cnt != 1:
             cnt += 1 #TODO used for testing
             # continue #TODO used for testing
         face_framework = generate_face_framework(face, shape_maps)

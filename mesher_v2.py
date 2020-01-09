@@ -29,16 +29,23 @@ from OCC.Core.TopAbs import TopAbs_REVERSED
 sampler.NUMBER_OF_SAMPLES = 10
 sampler.INCLUDE_INNER_WIRES = True
 sampler.SIMPLIFY_LINEAR_EDGES = False
+
+MAX_ITERATIONS = -1 # -1 for unlimited
+
+# shape and size test options
 SMALLEST_ANGLE = np.deg2rad(30)
 SIZE_THRESHOLD = float('inf')
-MAX_ITERATIONS = -1 # -1 for unlimited
-USE_TRAVEL_TEST = True
+
+# options to avoid 'ping-pong encroachment'
+SKIP_DOMAIN_CORNERS = False # skip all triangles in domain corners
+SKIP_SMALL_DOMAIN_CORNERS = True # skip -//- with angle smaller than threshold
+PPE_THRESHOLD = SMALLEST_ANGLE#np.deg2rad(60)
 
 # __main__ config
-INPUT_PATH = paths.STEP_SURFFIL
+INPUT_PATH = paths.STEP_TEST1
 OUTPUT_DIR = paths.DIR_TMP
 
-DEBUG_VERTICES = [] #TODO remove
+DEBUG_VERTICES = []
 
 def triangulate_dt(vertices):
     triangles = []
@@ -282,7 +289,7 @@ def flip_until_scdt(omesh):
     return
 
 def find_largest_failing_triangle(omesh):
-    def is_boundary_corner(omesh, vh0, vh1, vh2):
+    def is_domain_corner(omesh, vh0, vh1, vh2):
         sv0 = sv_from_vh(omesh, vh0)
         sv1 = sv_from_vh(omesh, vh1)
         sv2 = sv_from_vh(omesh, vh2)
@@ -298,14 +305,39 @@ def find_largest_failing_triangle(omesh):
                 return True
 
         return False
+    def skip_to_avoid_ping_pong_encroachment(omesh, fh):
+        def in_danger_of_encroachment(omesh, hh0, hh1):
+            assert hh1 == omesh.next_halfedge_handle(hh0)
+            eh0 = omesh.edge_handle(hh0)
+            eh1 = omesh.edge_handle(hh1)
+
+            if omesh.is_boundary(eh0) and omesh.is_boundary(eh1):
+                p0 = omesh.point(omesh.from_vertex_handle(hh0))
+                p1 = omesh.point(omesh.to_vertex_handle(hh0))
+                p2 = omesh.point(omesh.to_vertex_handle(hh1))
+                angle = calculate_angle_between_vectors(normalize(p0-p1), normalize(p2-p1))
+
+                return angle < PPE_THRESHOLD
+
+            return False
+        hh0 = omesh.halfedge_handle(fh)
+        hh1 = omesh.next_halfedge_handle(hh0)
+        hh2 = omesh.next_halfedge_handle(hh1)
+
+        if in_danger_of_encroachment(omesh, hh0, hh1) or\
+           in_danger_of_encroachment(omesh, hh1, hh2) or\
+           in_danger_of_encroachment(omesh, hh2, hh0):
+            return True
+
+        return False
     def shape_test(p0, p1, p2):
         alpha = calculate_angle_in_corner(p0, p1, p2)
         beta = calculate_angle_in_corner(p1, p2, p0)
         gamma = calculate_angle_in_corner(p2, p0, p1)
         return min(alpha, beta, gamma) > SMALLEST_ANGLE
     def size_test(p0, p1, p2):
-        t_size = calculate_area(p0, p1, p2)
-        return t_size <= SIZE_THRESHOLD
+        t_area = calculate_area(p0, p1, p2)
+        return t_area <= SIZE_THRESHOLD, t_area
     def calculate_circumradius_v1(p0, p1, p2):
         # based on book 'Delaunay Mesh Generation' page 26
         l01 = np.linalg.norm(p1 - p0)
@@ -335,11 +367,13 @@ def find_largest_failing_triangle(omesh):
 
         return (l01*l12*l20) / (2*double_area)
     delta = om.FaceHandle(-1)
-    delta_circumradius = float('-inf')
+    delta_size = float('-inf')
 
     for fh in omesh.faces():
         vh0, vh1, vh2 = collect_triangle_vertex_handles(omesh, fh)
-        if is_boundary_corner(omesh, vh0, vh1, vh2):
+        if SKIP_DOMAIN_CORNERS and is_domain_corner(omesh, vh0, vh1, vh2):
+            continue
+        if SKIP_SMALL_DOMAIN_CORNERS and skip_to_avoid_ping_pong_encroachment(omesh, fh):
             continue
 
         p0 = omesh.point(vh0)
@@ -347,88 +381,16 @@ def find_largest_failing_triangle(omesh):
         p2 = omesh.point(vh2)
 
         well_shaped = shape_test(p0, p1, p2)
-        well_sized = size_test(p0, p1, p2)
+        well_sized, t_area = size_test(p0, p1, p2)
         if well_shaped and well_sized:
             continue
 
-        t_circumradius = calculate_circumradius_v2(p0, p1, p2)
-        if t_circumradius > delta_circumradius:
-            delta_circumradius = t_circumradius
+        t_size = calculate_circumradius_v2(p0, p1, p2)
+        if t_size > delta_size:
+            delta_size = t_size
             delta = fh
 
     return delta
-
-# calculate barycentric coordinates of 3-dimensional circumcenter
-def calculate_bcc(A, B, C):
-    a = np.linalg.norm(C-B)
-    b = np.linalg.norm(A-C)
-    c = np.linalg.norm(B-A)
-    a_squared = a*a
-    b_squared = b*b
-    c_squared = c*c
-
-    bx = a_squared * (b_squared + c_squared - a_squared)
-    by = b_squared * (c_squared + a_squared - b_squared)
-    bz = c_squared * (a_squared + b_squared - c_squared)
-
-    return np.array((bx, by, bz))
-
-def cartesian_from_barycentric(p0, p1, p2, bx, by, bz):
-    cartesian = (bx*p0 + by*p1 + bz*p2) / (bx+by+bz)
-    return np.array(cartesian)
-
-#TODO correct approxcimation by normal convergence
-# calculate surface circumcenter based on circumcenter in barycentric coordinates
-def scc_from_bcc(sv0, sv1, sv2, bcc):
-    u, v    = cartesian_from_barycentric(sv0.UV_vec2(),  sv1.UV_vec2(),  sv2.UV_vec2(),  *bcc)
-    # x, y, z = cartesian_from_barycentric(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3(), *bcc)
-
-    # scc = SuperVertex(x, y, z, u, v)
-    scc = SuperVertex(u=u, v=v)
-    scc.face_id = sv0.face_id
-    scc.face = sv0.face
-    scc.project_to_XYZ()
-
-    return scc
-
-def calculate_circumcenter_3d(A, B, C):
-    # by 'Oscar Lanzi III' from
-    # https://sci.math.narkive.com/nJMeroLe/circumcenter-of-a-3d-triangle
-    a = np.linalg.norm(B-C)
-    b = np.linalg.norm(A-C)
-    c = np.linalg.norm(A-B)
-    a_square = a**2
-    b_square = b**2
-    c_square = c**2
-    A_comp = A*(a_square*(b_square+c_square-a_square))
-    B_comp = B*(b_square*(a_square+c_square-b_square))
-    C_comp = C*(c_square*(a_square+b_square-c_square))
-    divisor = 2*(a_square*b_square+a_square*c_square+b_square*c_square)-(a**4+b**4+c**4)
-    circumcenter = (A_comp+B_comp+C_comp) / divisor
-
-    return circumcenter
-
-# while the cc in 3d can be calc. exactly, for the 2d ones only possible candidates can be given
-def calculate_circumcenter_2d_candidates(c_3d, n, face):
-    def array_from_inter(inter, i):
-        u = inter.UParameter(i)
-        v = inter.VParameter(i)
-        return np.array((u, v))
-    center_line = gp_Lin(gp_Pnt(c_3d[0], c_3d[1], c_3d[2]), gp_Dir(n[0], n[1], n[2]))
-
-    inter = IntCurvesFace_Intersector(face, 0.0001)
-    inter.Perform(center_line, -float('inf'), float('inf'))
-
-    if inter.IsDone():
-        occ_offset = 1 # occ indices start at 1
-        c_2d_candidates = [array_from_inter(inter, i+occ_offset) for i in range(inter.NbPnt())]
-        if face.Orientation() == TopAbs_REVERSED:
-            for c_2d in c_2d_candidates:
-                # reverse u axis for reversed faces
-                c_2d[0] = reverse_u(c_2d[0], face)
-        return c_2d_candidates
-    else:
-        raise Exception('calculate_surface_circumcenter() error - intersector not done')
 
 # for triangle p0-p1-p2 returns orientation test results of all three edges with px
 def orientations(p0, p1, p2, px):
@@ -438,74 +400,105 @@ def orientations(p0, p1, p2, px):
 
     return ori0, ori1, ori2
 
-def find_point_inside(omesh, fh, points):
-    def lies_inside(omesh, fh, p):
-        sv0, sv1, sv2 = collect_triangle_supervertices(omesh, fh)
-        p0 = tuple(sv0.UV_vec2())
-        p1 = tuple(sv1.UV_vec2())
-        p2 = tuple(sv2.UV_vec2())
-
-        ori0, ori1, ori2 = orientations(p0, p1, p2, p)
-
-        if np.allclose(ori0, 0.0) or np.allclose(ori1, 0.0) or np.allclose(ori2, 0.0):
-            return True
-
-        if ori0 > 0.0 and ori1 > 0.0 and ori2 > 0.0:
-            return True
-
-        return False
-    for i in range(len(points)):
-        if lies_inside(omesh, fh, points[i]):
-            return i
-
-    return -1
-
-def scc_from_c_2d(c_2d, other_sv):
-    scc = SuperVertex(u=c_2d[0], v=c_2d[1])
-    scc.face = other_sv.face
-    scc.face_id = other_sv.face_id
-    scc.project_to_XYZ()
-
-    return scc
-
-def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal):
-    def halfedge_crossed_by_ray_shadow(omesh, hh, ray_ori, ray_dir, normal):
-        print('halfedge_crossed_by_ray_shadow(): ', end='') #TODO remove
-        assert np.allclose(np.linalg.norm(ray_dir), 1.0)
-        assert np.allclose(np.linalg.norm(normal), 1.0)
-        p_from = sv_from_vh(omesh, omesh.from_vertex_handle(hh)).XYZ_vec3()
-        p_to = sv_from_vh(omesh, omesh.to_vertex_handle(hh)).XYZ_vec3()
-
-        v_from = shortest_vector_between_two_lines(p_from, normal, ray_ori, ray_dir)
-        v_to = shortest_vector_between_two_lines(p_to, normal, ray_ori, ray_dir)
-
-        dp = np.dot(v_from, v_to)
-        print(dp < 0) #TODO remove
-
-        return dp < 0
-    p_orig = sv_orig.XYZ_vec3()
-    ray_dir = normalize(c_3d - p_orig)
-
-    # halt if we encounter a boundary edge (split case)
-    while not omesh.is_boundary(omesh.edge_handle(hh)):
-        hh = omesh.opposite_halfedge_handle(hh)
-        fh = omesh.face_handle(hh)
-
-        # halt if surface circumcenter is found to be insides fh (insert case)
-        inside_index = find_point_inside(omesh, fh, c_2d_candidates)
-        if inside_index >= 0:
-            return fh, scc_from_c_2d(c_2d_candidates[inside_index], sv_orig)
-
-        # which of the remaining edges is crossed to travel further in that direction
-        hh = omesh.next_halfedge_handle(hh)
-        if not halfedge_crossed_by_ray_shadow(omesh, hh, p_orig, ray_dir, normal):
-            # shadow apparently crossed the other edge
-            hh = omesh.next_halfedge_handle(hh)
-            assert halfedge_crossed_by_ray_shadow(omesh, hh, p_orig, ray_dir, normal)
-
-    return omesh.edge_handle(hh), None
-
 def calculate_refinement(omesh, delta):
+    def calculate_circumcenter_3d(A, B, C):
+        # by 'Oscar Lanzi III' from
+        # https://sci.math.narkive.com/nJMeroLe/circumcenter-of-a-3d-triangle
+        a = np.linalg.norm(B-C)
+        b = np.linalg.norm(A-C)
+        c = np.linalg.norm(A-B)
+        a_square = a**2
+        b_square = b**2
+        c_square = c**2
+        A_comp = A*(a_square*(b_square+c_square-a_square))
+        B_comp = B*(b_square*(a_square+c_square-b_square))
+        C_comp = C*(c_square*(a_square+b_square-c_square))
+        divisor = 2*(a_square*b_square+a_square*c_square+b_square*c_square)-(a**4+b**4+c**4)
+        circumcenter = (A_comp+B_comp+C_comp) / divisor
+
+        return circumcenter
+    def calculate_circumcenter_2d_candidates(c_3d, n, face):
+        def array_from_inter(inter, i):
+            u = inter.UParameter(i)
+            v = inter.VParameter(i)
+            return np.array((u, v))
+        center_line = gp_Lin(gp_Pnt(c_3d[0], c_3d[1], c_3d[2]), gp_Dir(n[0], n[1], n[2]))
+
+        inter = IntCurvesFace_Intersector(face, 0.0001)
+        inter.Perform(center_line, -float('inf'), float('inf'))
+
+        if inter.IsDone():
+            occ_offset = 1 # occ indices start at 1
+            c_2d_candidates = [array_from_inter(inter, i+occ_offset) for i in range(inter.NbPnt())]
+            if face.Orientation() == TopAbs_REVERSED:
+                for c_2d in c_2d_candidates:
+                    # reverse u axis for reversed faces
+                    c_2d[0] = reverse_u(c_2d[0], face)
+            return c_2d_candidates
+        else:
+            raise Exception('calculate_surface_circumcenter() error - intersector not done')
+    def find_point_inside(omesh, fh, points):
+        def lies_inside(omesh, fh, p):
+            sv0, sv1, sv2 = collect_triangle_supervertices(omesh, fh)
+            p0 = tuple(sv0.UV_vec2())
+            p1 = tuple(sv1.UV_vec2())
+            p2 = tuple(sv2.UV_vec2())
+
+            ori0, ori1, ori2 = orientations(p0, p1, p2, p)
+
+            if np.allclose(ori0, 0.0) or np.allclose(ori1, 0.0) or np.allclose(ori2, 0.0):
+                return True
+
+            if ori0 > 0.0 and ori1 > 0.0 and ori2 > 0.0:
+                return True
+
+            return False
+        for i in range(len(points)):
+            if lies_inside(omesh, fh, points[i]):
+                return i
+
+        return -1
+    def scc_from_c_2d(c_2d, other_sv):
+        scc = SuperVertex(u=c_2d[0], v=c_2d[1])
+        scc.face = other_sv.face
+        scc.face_id = other_sv.face_id
+        scc.project_to_XYZ()
+
+        return scc
+    def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal):
+        def halfedge_crossed_by_ray_shadow(omesh, hh, ray_ori, ray_dir, normal):
+            assert np.allclose(np.linalg.norm(ray_dir), 1.0)
+            assert np.allclose(np.linalg.norm(normal), 1.0)
+            p_from = sv_from_vh(omesh, omesh.from_vertex_handle(hh)).XYZ_vec3()
+            p_to = sv_from_vh(omesh, omesh.to_vertex_handle(hh)).XYZ_vec3()
+
+            v_from = shortest_vector_between_two_lines(p_from, normal, ray_ori, ray_dir)
+            v_to = shortest_vector_between_two_lines(p_to, normal, ray_ori, ray_dir)
+
+            dp = np.dot(v_from, v_to)
+
+            return dp < 0
+        p_orig = sv_orig.XYZ_vec3()
+        ray_dir = normalize(c_3d - p_orig)
+
+        # halt if we encounter a boundary edge (split case)
+        while not omesh.is_boundary(omesh.edge_handle(hh)):
+            hh = omesh.opposite_halfedge_handle(hh)
+            fh = omesh.face_handle(hh)
+
+            # halt if surface circumcenter is found to be insides fh (insert case)
+            inside_index = find_point_inside(omesh, fh, c_2d_candidates)
+            if inside_index >= 0:
+                return fh, scc_from_c_2d(c_2d_candidates[inside_index], sv_orig)
+
+            # which of the remaining edges is crossed to travel further in that direction
+            hh = omesh.next_halfedge_handle(hh)
+            if not halfedge_crossed_by_ray_shadow(omesh, hh, p_orig, ray_dir, normal):
+                # shadow apparently crossed the other edge
+                hh = omesh.next_halfedge_handle(hh)
+                assert halfedge_crossed_by_ray_shadow(omesh, hh, p_orig, ray_dir, normal)
+
+        return omesh.edge_handle(hh), None
     hh = omesh.halfedge_handle(delta)
     vh0 = omesh.from_vertex_handle(hh)
     vh1 = omesh.to_vertex_handle(hh)
@@ -717,7 +710,7 @@ def chew93_Surface(face_mesh):
         iter_counter += 1
 
     parse_back(omesh, face_mesh)
-    # vertices += DEBUG_VERTICES #TODO remove
+    # vertices += DEBUG_VERTICES
 
     return
 
