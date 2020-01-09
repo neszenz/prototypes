@@ -35,7 +35,7 @@ MAX_ITERATIONS = -1 # -1 for unlimited
 USE_TRAVEL_TEST = True
 
 # __main__ config
-INPUT_PATH = paths.STEP_TEST1
+INPUT_PATH = paths.STEP_SURFFIL
 OUTPUT_DIR = paths.DIR_TMP
 
 DEBUG_VERTICES = [] #TODO remove
@@ -281,7 +281,6 @@ def flip_until_scdt(omesh):
 
     return
 
-#TODO change largest area to largest circumradius
 def find_largest_failing_triangle(omesh):
     def is_boundary_corner(omesh, vh0, vh1, vh2):
         sv0 = sv_from_vh(omesh, vh0)
@@ -303,34 +302,59 @@ def find_largest_failing_triangle(omesh):
         alpha = calculate_angle_in_corner(p0, p1, p2)
         beta = calculate_angle_in_corner(p1, p2, p0)
         gamma = calculate_angle_in_corner(p2, p0, p1)
-
         return min(alpha, beta, gamma) > SMALLEST_ANGLE
     def size_test(p0, p1, p2):
         t_size = calculate_area(p0, p1, p2)
+        return t_size <= SIZE_THRESHOLD
+    def calculate_circumradius_v1(p0, p1, p2):
+        # based on book 'Delaunay Mesh Generation' page 26
+        l01 = np.linalg.norm(p1 - p0)
+        l12 = np.linalg.norm(p2 - p1)
+        l20 = np.linalg.norm(p0 - p2)
 
-        return t_size <= SIZE_THRESHOLD, t_size
+        l_min = l01 if l01 < l12 else l12
+        l_min = l20 if l20 < l_min else l_min
+
+        alpha = calculate_angle_in_corner(p2, p0, p1)
+        beta = calculate_angle_in_corner(p0, p1, p2)
+        gamma = calculate_angle_in_corner(p1, p2, p0)
+
+        a_min = alpha if alpha < beta else beta
+        a_min = gamma if gamma < a_min else a_min
+
+        return l_min / (2 * np.sin(a_min))
+    def calculate_circumradius_v2(p0, p1, p2):
+        # based on https://artofproblemsolving.com/wiki/index.php/Circumradius
+        l01 = np.linalg.norm(p1 - p0)
+        l12 = np.linalg.norm(p2 - p1)
+        l20 = np.linalg.norm(p0 - p2)
+
+        p01 = p1 - p0
+        p02 = p2 - p0
+        double_area = np.linalg.norm(np.cross(p01, p02))
+
+        return (l01*l12*l20) / (2*double_area)
     delta = om.FaceHandle(-1)
-    delta_size = float('-inf')
+    delta_circumradius = float('-inf')
 
     for fh in omesh.faces():
         vh0, vh1, vh2 = collect_triangle_vertex_handles(omesh, fh)
         if is_boundary_corner(omesh, vh0, vh1, vh2):
             continue
+
         p0 = omesh.point(vh0)
         p1 = omesh.point(vh1)
         p2 = omesh.point(vh2)
 
         well_shaped = shape_test(p0, p1, p2)
-        well_sized, t_size = size_test(p0, p1, p2)
-
+        well_sized = size_test(p0, p1, p2)
         if well_shaped and well_sized:
             continue
 
-        if t_size > delta_size:
-            delta_size = t_size
+        t_circumradius = calculate_circumradius_v2(p0, p1, p2)
+        if t_circumradius > delta_circumradius:
+            delta_circumradius = t_circumradius
             delta = fh
-        else:
-            assert delta.idx() >= 0
 
     return delta
 
