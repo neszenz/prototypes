@@ -283,6 +283,22 @@ def flip_until_scdt(omesh):
 
 #TODO change largest area to largest circumradius
 def find_largest_failing_triangle(omesh):
+    def is_boundary_corner(omesh, vh0, vh1, vh2):
+        sv0 = sv_from_vh(omesh, vh0)
+        sv1 = sv_from_vh(omesh, vh1)
+        sv2 = sv_from_vh(omesh, vh2)
+
+        if not sv0.edges_with_p is None:
+            if len(sv0.edges_with_p) == 2:
+                return True
+        if not sv1.edges_with_p is None:
+            if len(sv1.edges_with_p) == 2:
+                return True
+        if not sv2.edges_with_p is None:
+            if len(sv2.edges_with_p) == 2:
+                return True
+
+        return False
     def shape_test(p0, p1, p2):
         alpha = calculate_angle_in_corner(p0, p1, p2)
         beta = calculate_angle_in_corner(p1, p2, p0)
@@ -298,6 +314,8 @@ def find_largest_failing_triangle(omesh):
 
     for fh in omesh.faces():
         vh0, vh1, vh2 = collect_triangle_vertex_handles(omesh, fh)
+        if is_boundary_corner(omesh, vh0, vh1, vh2):
+            continue
         p0 = omesh.point(vh0)
         p1 = omesh.point(vh1)
         p2 = omesh.point(vh2)
