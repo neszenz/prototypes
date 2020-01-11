@@ -42,7 +42,7 @@ SKIP_SMALL_DOMAIN_CORNERS = True # skip -//- with angle smaller than threshold
 PPE_THRESHOLD = SMALLEST_ANGLE#np.deg2rad(60)
 
 # __main__ config
-INPUT_PATH = paths.STEP_TEST1
+INPUT_PATH = paths.STEP_SURFFIL
 OUTPUT_DIR = paths.DIR_TMP
 
 DEBUG_VERTICES = []
@@ -335,6 +335,17 @@ def find_largest_failing_triangle(omesh):
         beta = calculate_angle_in_corner(p1, p2, p0)
         gamma = calculate_angle_in_corner(p2, p0, p1)
         return min(alpha, beta, gamma) > SMALLEST_ANGLE
+    def approximation_distance(sv0, sv1, sv2):
+        cog_2d = (sv0.UV_vec2() + sv1.UV_vec2() + sv2.UV_vec2()) / 3
+        sv_cog = SuperVertex(u=cog_2d[0], v=cog_2d[1])
+        sv_cog.set_same_face_as(sv0)
+        sv_cog.project_to_XYZ()
+
+        cog_surface = sv_cog.XYZ_vec3()
+        cog_3d = (sv0.XYZ_vec3() + sv1.XYZ_vec3() + sv2.XYZ_vec3()) / 3
+        distance = np.linalg.norm(cog_surface - cog_3d)
+
+        return distance
     def size_test(p0, p1, p2):
         t_area = calculate_area(p0, p1, p2)
         return t_area <= SIZE_THRESHOLD, t_area
@@ -368,6 +379,9 @@ def find_largest_failing_triangle(omesh):
         return (l01*l12*l20) / (2*double_area)
     delta = om.FaceHandle(-1)
     delta_size = float('-inf')
+    min_distance = float('inf') #TODO remove
+    max_distance = 0.0 #TODO remove
+    all_well_shaped = True #TODO remove
 
     for fh in omesh.faces():
         vh0, vh1, vh2 = collect_triangle_vertex_handles(omesh, fh)
@@ -380,15 +394,32 @@ def find_largest_failing_triangle(omesh):
         p1 = omesh.point(vh1)
         p2 = omesh.point(vh2)
 
+        #TODO integrate
+        sv0 = sv_from_vh(omesh, vh0)
+        sv1 = sv_from_vh(omesh, vh1)
+        sv2 = sv_from_vh(omesh, vh2)
+        t_distance = approximation_distance(sv0, sv1, sv2)
+        max_distance = max(max_distance, t_distance)
+        min_distance = min(min_distance, t_distance)
+        #TODO integrate
+
         well_shaped = shape_test(p0, p1, p2)
+        if not well_shaped: #TODO remove
+            all_well_shaped = False
         well_sized, t_area = size_test(p0, p1, p2)
+        well_sized = t_distance < 1.0 #TODO remove
         if well_shaped and well_sized:
             continue
 
         t_size = calculate_circumradius_v2(p0, p1, p2)
+        # t_size = t_distance #TODO remove
         if t_size > delta_size:
             delta_size = t_size
             delta = fh
+
+    #TODO remove
+    print('[', min_distance, ', ', max_distance, '], all_well_shaped: ', all_well_shaped)
+    #TODO remove
 
     return delta
 
