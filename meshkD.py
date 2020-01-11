@@ -65,6 +65,11 @@ class SuperVertex:
         # len-2-list: vertex on boundary endpoint
         self.edges_with_p = None # tuple of TopoDS_EDGE and sample parameter
 
+    def set_same_face_as(self, other):
+        self.face = other.face
+        self.face_id = other.face_id
+        return
+
     def compute_halfway_on_shared_edge(sv0, sv1):
         def get_shared_edge(sv0, sv1):
             for sv0_edge_with_p in sv0.edges_with_p:
