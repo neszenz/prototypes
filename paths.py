@@ -9,6 +9,7 @@ STEP_SPHERE = '../resources/step/spherical_surf.step'
 STEP_SURFFIL = '../resources/step/surface_filling.step'
 STEP_TWIST = '../resources/step/twist.step'
 STEP_TEST1 = '../resources/step/zTest1.step'
+STEP_C0 = '../resources/gmsh_custom/c0.step'
 # abc data set collection
 STEP_42 = '../resources/abc/step/00090042/00090042_1cbd5c59fb8c0895c3599d4d_step_007.step'
 STEP_111 = '../resources/abc/step/00090111/00090111_7eac35f07183d39b4da202d3_step_000.step'

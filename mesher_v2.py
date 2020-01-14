@@ -279,12 +279,58 @@ def flip_until_scdt(omesh):
                 assert omesh.is_flip_ok(eh)
                 omesh.flip(eh)
                 return True
-            else:
-                continue
 
         return False
     while flip_one_non_scdt_edge(omesh):
         continue
+
+    return
+
+def refine_until_all_dihedral_angles_sub_90_degree(omesh, vertices):
+    def incident_faces_violate_90_degree_criteria(omesh, fh0, fh1):
+        vh0f0, vh1f0, vh2f0 = collect_triangle_vertex_handles(omesh, fh0)
+        p0f0 = omesh.point(vh0f0)
+        p1f0 = omesh.point(vh1f0)
+        p2f0 = omesh.point(vh2f0)
+        vh0f1, vh1f1, vh2f1 = collect_triangle_vertex_handles(omesh, fh1)
+        p0f1 = omesh.point(vh0f1)
+        p1f1 = omesh.point(vh1f1)
+        p2f1 = omesh.point(vh2f1)
+
+        n0 = calculate_normal_normalized(p0f0, p1f0, p2f0)
+        n1 = calculate_normal_normalized(p0f1, p1f1, p2f1)
+
+        angle = calculate_angle_between_vectors(n0, n1)
+        print(np.rad2deg(angle))
+
+        return angle >= np.deg2rad(50)
+    def refine_once(omesh, vertices):
+        def refine_face(omesh, vertices, fh):
+            sv0, sv1, sv2 = collect_triangle_supervertices(omesh, fh)
+            hw_2d = (sv0.UV_vec2() + sv1.UV_vec2() + sv2.UV_vec2()) / 3
+            svhw = SuperVertex(u=hw_2d[0], v=hw_2d[1])
+            svhw.set_same_face_as(sv0)
+            svhw.project_to_XYZ()
+            vertices.append(svhw)
+            vhhw = omesh.add_vertex(svhw.XYZ_vec3())
+            set_supervertex_property(omesh, vhhw, svhw)
+            om.TriMesh.split(omesh, fh, vhhw)
+        for eh in omesh.edges():
+            if omesh.is_boundary(eh):
+                continue
+
+            fh0 = omesh.face_handle(omesh.halfedge_handle(eh, 0))
+            fh1 = omesh.face_handle(omesh.halfedge_handle(eh, 1))
+
+            if incident_faces_violate_90_degree_criteria(omesh, fh0, fh1):
+                print('90_degree_criteria_insert')
+                refine_face(omesh, vertices, fh0)
+                refine_face(omesh, vertices, fh1)
+                return True
+
+        return False
+    while refine_once(omesh, vertices):
+        flip_until_scdt(omesh)
 
     return
 
@@ -716,6 +762,7 @@ def chew93_Surface(face_mesh):
     triangulate_cdt(face_mesh)
     omesh = parse_into_openmesh(face_mesh)
     flip_until_scdt(omesh)
+    # refine_until_all_dihedral_angles_sub_90_degree(omesh, vertices)
 
     # step 2+3: find largest triangle that fails shape ans size criteria
     delta = find_largest_failing_triangle(omesh)
