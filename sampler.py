@@ -40,7 +40,7 @@ SIMPLIFY_LINEAR_EDGES = False
 REORDER_WIRES_FOR_CLOSEST_ENDPOINTS = True
 
 # __main__ config
-INPUT_PATH = paths.STEP_42
+INPUT_PATH = paths.STEP_98613
 OUTPUT_DIR = paths.DIR_TMP
 
 ## functions = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
