@@ -11,12 +11,6 @@ import paths
 
 ## config constants  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 INPUT_DIR = paths.DIR_TMP
-# INPUT_DIR = '../results/mesher/barycentric_coordinate_circumcenter_test/'
-# INPUT_DIR = '../results/mesher/travel-hybrid-convergence/'
-# INPUT_DIR = '../results/mesher/travel/' # barycentric + travel
-# INPUT_DIR = '../results/mesher/pure_intersector_travel/'
-# INPUT_DIR = '../results/mesher/approx_distance_size_test/'
-# INPUT_DIR = '../results/mesher/largest_criteria_differences/'
 DEFAULT_X = 1280
 DEFAULT_Y = 720
 ZOOM_DEFAULT = 100

@@ -34,11 +34,17 @@ MAX_ITERATIONS = -1 # -1 for unlimited
 
 # shape and size test options
 SMALLEST_ANGLE = np.deg2rad(30)
-SIZE_THRESHOLD = float('inf')
+SKIP_SIZE_TEST = True
+DISTANCE_THRESHOLD = 1.0
+
+PRIORITIZE_AREA         = 0
+PRIORITIZE_CIRCUMRADIUS = 1
+PRIORITIZE_DISTANCE     = 2
+PRIORITY_FACTOR = PRIORITIZE_CIRCUMRADIUS
 
 # options to avoid 'ping-pong encroachment'
-SKIP_DOMAIN_CORNERS = False # skip all triangles in domain corners
-SKIP_SMALL_DOMAIN_CORNERS = True # skip -//- with angle smaller than threshold
+SKIP_ALL_DOMAIN_CORNERS = False # skip all triangles in domain corners
+SKIP_PPE_DOMAIN_CORNERS = True # skip -//- with angle smaller than threshold
 PPE_THRESHOLD = SMALLEST_ANGLE#np.deg2rad(60)
 
 # __main__ config
@@ -286,60 +292,8 @@ def flip_until_scdt(omesh):
 
     return
 
-def refine_until_all_dihedral_angles_sub_90_degree(omesh, vertices):
-    def incident_faces_violate_90_degree_criteria(omesh, fh0, fh1):
-        vh0f0, vh1f0, vh2f0 = collect_triangle_vertex_handles(omesh, fh0)
-        p0f0 = omesh.point(vh0f0)
-        p1f0 = omesh.point(vh1f0)
-        p2f0 = omesh.point(vh2f0)
-        vh0f1, vh1f1, vh2f1 = collect_triangle_vertex_handles(omesh, fh1)
-        p0f1 = omesh.point(vh0f1)
-        p1f1 = omesh.point(vh1f1)
-        p2f1 = omesh.point(vh2f1)
-
-        n0 = calculate_normal_normalized(p0f0, p1f0, p2f0)
-        n1 = calculate_normal_normalized(p0f1, p1f1, p2f1)
-
-        angle = calculate_angle_between_vectors(n0, n1)
-        print(np.rad2deg(angle))
-
-        return angle >= np.deg2rad(50)
-    def refine_once(omesh, vertices):
-        def refine_face(omesh, vertices, fh):
-            sv0, sv1, sv2 = collect_triangle_supervertices(omesh, fh)
-            hw_2d = (sv0.UV_vec2() + sv1.UV_vec2() + sv2.UV_vec2()) / 3
-            svhw = SuperVertex(u=hw_2d[0], v=hw_2d[1])
-            svhw.set_same_face_as(sv0)
-            svhw.project_to_XYZ()
-            vertices.append(svhw)
-            vhhw = omesh.add_vertex(svhw.XYZ_vec3())
-            set_supervertex_property(omesh, vhhw, svhw)
-            om.TriMesh.split(omesh, fh, vhhw)
-        for eh in omesh.edges():
-            if omesh.is_boundary(eh):
-                continue
-
-            fh0 = omesh.face_handle(omesh.halfedge_handle(eh, 0))
-            fh1 = omesh.face_handle(omesh.halfedge_handle(eh, 1))
-
-            if incident_faces_violate_90_degree_criteria(omesh, fh0, fh1):
-                print('90_degree_criteria_insert')
-                refine_face(omesh, vertices, fh0)
-                refine_face(omesh, vertices, fh1)
-                return True
-
-        return False
-    while refine_once(omesh, vertices):
-        flip_until_scdt(omesh)
-
-    return
-
 def find_largest_failing_triangle(omesh):
-    def is_domain_corner(omesh, vh0, vh1, vh2):
-        sv0 = sv_from_vh(omesh, vh0)
-        sv1 = sv_from_vh(omesh, vh1)
-        sv2 = sv_from_vh(omesh, vh2)
-
+    def is_domain_corner(omesh, sv0, sv1, sv2):
         if not sv0.edges_with_p is None:
             if len(sv0.edges_with_p) == 2:
                 return True
@@ -376,26 +330,39 @@ def find_largest_failing_triangle(omesh):
             return True
 
         return False
-    def shape_test(p0, p1, p2):
+    def shape_test(sv0, sv1, sv2):
+        p0 = sv0.XYZ_vec3()
+        p1 = sv1.XYZ_vec3()
+        p2 = sv2.XYZ_vec3()
+
         alpha = calculate_angle_in_corner(p0, p1, p2)
         beta = calculate_angle_in_corner(p1, p2, p0)
         gamma = calculate_angle_in_corner(p2, p0, p1)
+
         return min(alpha, beta, gamma) > SMALLEST_ANGLE
-    def approximation_distance(sv0, sv1, sv2):
-        cog_2d = (sv0.UV_vec2() + sv1.UV_vec2() + sv2.UV_vec2()) / 3
-        sv_cog = SuperVertex(u=cog_2d[0], v=cog_2d[1])
-        sv_cog.set_same_face_as(sv0)
-        sv_cog.project_to_XYZ()
+    def size_test(sv0, sv1, sv2):
+        def approximation_distance(sv0, sv1, sv2):
+            cog_2d = (sv0.UV_vec2() + sv1.UV_vec2() + sv2.UV_vec2()) / 3
+            sv_cog = SuperVertex(u=cog_2d[0], v=cog_2d[1])
+            sv_cog.set_same_face_as(sv0)
+            sv_cog.project_to_XYZ()
 
-        cog_surface = sv_cog.XYZ_vec3()
-        cog_3d = (sv0.XYZ_vec3() + sv1.XYZ_vec3() + sv2.XYZ_vec3()) / 3
-        distance = np.linalg.norm(cog_surface - cog_3d)
+            cog_surface = sv_cog.XYZ_vec3()
+            cog_3d = (sv0.XYZ_vec3() + sv1.XYZ_vec3() + sv2.XYZ_vec3()) / 3
+            distance = np.linalg.norm(cog_surface - cog_3d)
 
-        return distance
-    def size_test(p0, p1, p2):
-        t_area = calculate_area(p0, p1, p2)
-        return t_area <= SIZE_THRESHOLD, t_area
-    def calculate_circumradius_v1(p0, p1, p2):
+            return distance
+        t_distance = approximation_distance(sv0, sv1, sv2)
+
+        if SKIP_SIZE_TEST:
+            return True, t_distance
+        else:
+            return t_distance < DISTANCE_THRESHOLD, t_distance
+    def calculate_circumradius_v1(sv0, sv1, sv2):
+        p0 = sv0.XYZ_vec3()
+        p1 = sv1.XYZ_vec3()
+        p2 = sv2.XYZ_vec3()
+
         # based on book 'Delaunay Mesh Generation' page 26
         l01 = np.linalg.norm(p1 - p0)
         l12 = np.linalg.norm(p2 - p1)
@@ -412,7 +379,11 @@ def find_largest_failing_triangle(omesh):
         a_min = gamma if gamma < a_min else a_min
 
         return l_min / (2 * np.sin(a_min))
-    def calculate_circumradius_v2(p0, p1, p2):
+    def calculate_circumradius_v2(sv0, sv1, sv2):
+        p0 = sv0.XYZ_vec3()
+        p1 = sv1.XYZ_vec3()
+        p2 = sv2.XYZ_vec3()
+
         # based on https://artofproblemsolving.com/wiki/index.php/Circumradius
         l01 = np.linalg.norm(p1 - p0)
         l12 = np.linalg.norm(p2 - p1)
@@ -425,47 +396,33 @@ def find_largest_failing_triangle(omesh):
         return (l01*l12*l20) / (2*double_area)
     delta = om.FaceHandle(-1)
     delta_size = float('-inf')
-    min_distance = float('inf') #TODO remove
-    max_distance = 0.0 #TODO remove
-    all_well_shaped = True #TODO remove
 
     for fh in omesh.faces():
-        vh0, vh1, vh2 = collect_triangle_vertex_handles(omesh, fh)
-        if SKIP_DOMAIN_CORNERS and is_domain_corner(omesh, vh0, vh1, vh2):
+        sv0, sv1, sv2 = collect_triangle_supervertices(omesh, fh)
+
+        if SKIP_ALL_DOMAIN_CORNERS and is_domain_corner(omesh, sv0, sv1, sv2):
             continue
-        if SKIP_SMALL_DOMAIN_CORNERS and skip_to_avoid_ping_pong_encroachment(omesh, fh):
+        if SKIP_PPE_DOMAIN_CORNERS and skip_to_avoid_ping_pong_encroachment(omesh, fh):
             continue
 
-        p0 = omesh.point(vh0)
-        p1 = omesh.point(vh1)
-        p2 = omesh.point(vh2)
+        well_shaped = shape_test(sv0, sv1, sv2)
+        well_sized, t_distance = size_test(sv0, sv1, sv2)
 
-        #TODO integrate
-        sv0 = sv_from_vh(omesh, vh0)
-        sv1 = sv_from_vh(omesh, vh1)
-        sv2 = sv_from_vh(omesh, vh2)
-        t_distance = approximation_distance(sv0, sv1, sv2)
-        max_distance = max(max_distance, t_distance)
-        min_distance = min(min_distance, t_distance)
-        #TODO integrate
-
-        well_shaped = shape_test(p0, p1, p2)
-        if not well_shaped: #TODO remove
-            all_well_shaped = False
-        well_sized, t_area = size_test(p0, p1, p2)
-        well_sized = t_distance < 1.0 #TODO remove
         if well_shaped and well_sized:
             continue
 
-        t_size = calculate_circumradius_v2(p0, p1, p2)
-        # t_size = t_distance #TODO remove
+        if PRIORITY_FACTOR == PRIORITIZE_AREA:
+            t_size = calculate_area(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+        elif PRIORITY_FACTOR == PRIORITIZE_CIRCUMRADIUS:
+            t_size = calculate_circumradius_v2(sv0, sv1, sv2)
+        elif PRIORITY_FACTOR == PRIORITIZE_DISTANCE:
+            t_size = t_distance
+        else:
+            raise Exception('PRIORITY_FACTOR unknown')
+
         if t_size > delta_size:
             delta_size = t_size
             delta = fh
-
-    #TODO remove
-    print('[', min_distance, ', ', max_distance, '], all_well_shaped: ', all_well_shaped)
-    #TODO remove
 
     return delta
 
@@ -731,17 +688,18 @@ def split_edge(omesh, vertices, eh):
 
     return
 
-#TODO make less stupid
 def parse_back(omesh, face_mesh):
     vertices, _, triangles, _ = face_mesh
-
-    vertices_tmp = []
     assert len(vertices) == len(omesh.vertices())
-    for i in range(len(omesh.vertices())):
-        sv = sv_from_vh(omesh, om.VertexHandle(i))
-        vertices_tmp.append(sv)
-    for i in range(len(vertices_tmp)):
-        vertices[i] = vertices_tmp[i]
+
+    # Supervertices are stored only once in the vertices list and openmesh
+    # changes index order eventually during vertex deletion. Therefor the list's
+    # order needs to be updated without overwriting and by that possibly
+    # deleting a supervertex
+    number_of_vertices = len(vertices)
+    for vh in omesh.vertices():
+        vertices.append(sv_from_vh(omesh, vh))
+    del vertices[:number_of_vertices]
 
     triangles.clear()
     for fh in omesh.faces():
@@ -762,7 +720,6 @@ def chew93_Surface(face_mesh):
     triangulate_cdt(face_mesh)
     omesh = parse_into_openmesh(face_mesh)
     flip_until_scdt(omesh)
-    # refine_until_all_dihedral_angles_sub_90_degree(omesh, vertices)
 
     # step 2+3: find largest triangle that fails shape ans size criteria
     delta = find_largest_failing_triangle(omesh)
