@@ -7,13 +7,16 @@ model face boundaries in a step model are circular. Outer boundaries are
 oriented counterclockwise and inner ones clockwise.
 This leads to the representation as described in meshkD.py.
 """
+import os
 import numpy as np
 
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Curve2d, BRepAdaptor_Surface
 from OCC.Core.gp import gp_Pnt, gp_Vec
+from OCC.Core.IFSelect import IFSelect_RetDone, IFSelect_ItemsByEntity
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from OCC.Core.ShapeAnalysis import shapeanalysis
+from OCC.Core.STEPControl import STEPControl_Reader
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FORWARD, TopAbs_REVERSED
 from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopTools import TopTools_IndexedMapOfShape
@@ -40,7 +43,7 @@ SIMPLIFY_LINEAR_EDGES = False
 REORDER_WIRES_FOR_CLOSEST_ENDPOINTS = True
 
 # __main__ config
-INPUT_PATH = paths.STEP_98613
+INPUT_PATH = paths.STEP_99999
 OUTPUT_DIR = paths.DIR_TMP
 
 ## functions = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
@@ -300,6 +303,35 @@ def sample_edges_in_framework(framework, shape_maps):
     return face_meshes
 
 def sample(path):
+    def read_step_file(filename, verbosity=True):
+        """ read the STEP file and returns a compound (based on OCC.Extend.DataExchange)
+        filename: the file path
+        return_as_shapes: optional, False by default. If True returns a list of shapes,
+                          else returns a single compound
+        verbosity: optional, False by default.
+        """
+        if not os.path.isfile(filename):
+            raise FileNotFoundError("%s not found." % filename)
+
+        step_reader = STEPControl_Reader()
+        status = step_reader.ReadFile(filename)
+
+        if status != IFSelect_RetDone:  # check status
+            raise AssertionError("Error: can't read file.")
+
+        if verbosity:
+            failsonly = False
+            step_reader.PrintCheckLoad(failsonly, IFSelect_ItemsByEntity)
+            step_reader.PrintCheckTransfer(failsonly, IFSelect_ItemsByEntity)
+
+        _nbr = step_reader.TransferRoots()
+        _nbs = step_reader.NbShapes()
+
+        shape_to_return = step_reader.OneShape()  # a compound
+        if shape_to_return.IsNull():
+            raise AssertionError("Shape is null.")
+
+        return shape_to_return
     print('>> start sampler of type', SAMPLER_TYPES.string_dict[SAMPLER_TYPE])
     print('>> loading step file \'', path, '\'', sep='')
     compound = read_step_file(path, verbosity=False)
