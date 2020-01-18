@@ -44,7 +44,7 @@ PRIORITY_FACTOR = PRIORITIZE_CIRCUMRADIUS
 
 # options to avoid 'ping-pong encroachment'
 SKIP_ALL_DOMAIN_CORNERS = False # skip all triangles in domain corners
-SKIP_PPE_DOMAIN_CORNERS = True # skip -//- with angle smaller than threshold
+SKIP_PPE_DOMAIN_CORNERS = True # skip those with angle smaller than threshold
 PPE_THRESHOLD = SMALLEST_ANGLE#np.deg2rad(60)
 
 # __main__ config
@@ -212,6 +212,7 @@ def collect_triangle_supervertices(omesh, fh):
 
     return sv0, sv1, sv2
 
+# creates scdt criteria by edge flips via repeated linear search
 def flip_until_scdt(omesh):
     def flip_one_non_scdt_edge(omesh):
         def would_flip_triangle_in_2D(omesh, vhs):
@@ -289,6 +290,106 @@ def flip_until_scdt(omesh):
         return False
     while flip_one_non_scdt_edge(omesh):
         continue
+
+    return
+
+# restores scdt criteria by edge flips via depth-first-search (dfs)
+def restore_scdt(omesh, vh_start):
+    def create_backlog_from_neighbors(omesh, vh):
+        backlog = []
+
+        for vvh in omesh.vv(vh):
+            backlog.append(vvh)
+
+        return backlog
+    def process_vertex(omesh, vh):
+        def would_flip_triangle_in_2D(omesh, vhs):
+            vh0, vh1, vh2, vh3 = vhs
+
+            sv0 = sv_from_vh(omesh, vh0)
+            sv1 = sv_from_vh(omesh, vh1)
+            sv2 = sv_from_vh(omesh, vh2)
+            sv3 = sv_from_vh(omesh, vh3)
+            assert np.allclose(sv0.XYZ_vec3(), omesh.point(vh0))
+            assert np.allclose(sv1.XYZ_vec3(), omesh.point(vh1))
+            assert np.allclose(sv2.XYZ_vec3(), omesh.point(vh2))
+            assert np.allclose(sv3.XYZ_vec3(), omesh.point(vh3))
+
+            p0 = sv0.UV_vec2()
+            p1 = sv1.UV_vec2()
+            p2 = sv2.UV_vec2()
+            p3 = sv3.UV_vec2()
+
+            # situation before flip
+            t0 = (tuple(p0), tuple(p1), tuple(p2))
+            t1 = (tuple(p0), tuple(p3), tuple(p1))
+            assert counter_clockwise(*t0) == True
+            assert counter_clockwise(*t1) == True
+
+            # situation after flip
+            t2 = (tuple(p3), tuple(p2), tuple(p0))
+            t3 = (tuple(p3), tuple(p1), tuple(p2))
+
+            return counter_clockwise(*t2) != True or counter_clockwise(*t3) != True
+        def flip_maximizes_minimum_angle(omesh, vhs):
+            def get_min_face_angle(triangle):
+                p0, p1, p2 = triangle
+
+                alpha = calculate_angle_in_corner(p0, p1, p2)
+                beta = calculate_angle_in_corner(p1, p2, p0)
+                gamma = calculate_angle_in_corner(p2, p0, p1)
+                assert np.allclose((alpha+beta+gamma), np.pi)
+
+                min_angle = min(alpha, beta, gamma)
+
+                return min_angle
+            vh0, vh1, vh2, vh3 = vhs
+
+            p0 = omesh.point(vh0)
+            p1 = omesh.point(vh1)
+            p2 = omesh.point(vh2)
+            p3 = omesh.point(vh3)
+
+            # situation before flip
+            t0 = (p0, p1, p2)
+            t1 = (p0, p3, p1)
+            min_angle_before = min(get_min_face_angle(t0), get_min_face_angle(t1))
+
+            # situation after flip
+            t2 = (p3, p2, p0)
+            t3 = (p3, p1, p2)
+            min_angle_after = min(get_min_face_angle(t2), get_min_face_angle(t3))
+
+            return min_angle_after > min_angle_before
+        backlog_extension = []
+
+        incident_edges = []
+        for hh in omesh.voh(vh):
+            incident_edges.append(omesh.edge_handle(hh))
+
+        for eh in incident_edges:
+            if omesh.is_boundary(eh):
+                continue
+
+            vhs = collect_quadrilateral_vertices(omesh, eh)
+
+            if would_flip_triangle_in_2D(omesh, vhs):
+                continue
+
+            if flip_maximizes_minimum_angle(omesh, vhs):
+                assert omesh.is_flip_ok(eh)
+                backlog_extension += vhs
+                omesh.flip(eh)
+
+        return backlog_extension
+    backlog = create_backlog_from_neighbors(omesh, vh_start)
+
+    while len(backlog) > 0:
+        vh = backlog.pop()
+
+        backlog_extension = process_vertex(omesh, vh)
+
+        backlog += backlog_extension
 
     return
 
@@ -615,27 +716,47 @@ def insert_inner_vertex(omesh, vertices, fh, sv_new):
 
     omesh.garbage_collection()
 
-    return
+    assert all(omesh.point(vh_new) == sv_new.XYZ_vec3())
+    return vh_new
 
 def remove_inner_vertex(omesh, vertices, vh):
+    def remove_incident_faces(omesh, vh):
+        incident_faces = []
+        for fh in omesh.vf(vh):
+            incident_faces.append(fh)
+
+        while len(incident_faces) > 0:
+            fh = incident_faces.pop()
+            omesh.delete_face(fh, False)
+
+        omesh.garbage_collection()
+
+        return
+    print('remove_inner_vertex()')
     assert sv_from_vh(omesh, vh).edges_with_p is None
     assert not omesh.is_boundary(vh)
 
-    neighbors = []
+    # collect 1-ring neigbors for computing new triangulation
+    neighbor_handles = []
+    neighbor_vertices = []
     for vvh in omesh.vv(vh):
-        neighbors.append(sv_from_vh(omesh, vvh))
+        neighbor_handles.append(vvh)
+        neighbor_vertices.append(sv_from_vh(omesh, vvh))
 
-    triangles = triangulate_dt(neighbors)
+    triangles = triangulate_dt(neighbor_vertices)
 
+    # replace old by new triangulation
+    remove_incident_faces(omesh, vh)
+    for (i0, i1, i2) in triangles:
+        vh0 = neighbor_handles[i0]
+        vh1 = neighbor_handles[i1]
+        vh2 = neighbor_handles[i2]
+        omesh.add_face(vh0, vh1, vh2)
+
+    # only now remove vertex to avoid vertex handles to become invalid
     vertices.remove(sv_from_vh(omesh, vh))
     omesh.delete_vertex(vh, False)
     omesh.garbage_collection()
-
-    for (i0, i1, i2) in triangles:
-        vh0 = vh_from_sv(omesh, neighbors[i0])
-        vh1 = vh_from_sv(omesh, neighbors[i1])
-        vh2 = vh_from_sv(omesh, neighbors[i2])
-        omesh.add_face(vh0, vh1, vh2)
 
     return
 
@@ -650,7 +771,6 @@ def split_edge(omesh, vertices, eh):
 
                 pcurr = np.array((omesh.point(vh)))
 
-                #TODO consider inf dist if segment in line of sight
                 if np.linalg.norm(phw - pcurr) < h:
                     remove_inner_vertex(omesh, vertices, vh)
                     return True
@@ -686,7 +806,7 @@ def split_edge(omesh, vertices, eh):
         h = np.linalg.norm(sv_new.XYZ_vec3() - sv0.XYZ_vec3())
         remove_encroaching_vertices(omesh, vertices, vh_new, h)
 
-    return
+    return vh_from_sv(omesh, sv_new)
 
 def parse_back(omesh, face_mesh):
     vertices, _, triangles, _ = face_mesh
@@ -732,13 +852,13 @@ def chew93_Surface(face_mesh):
         handle, scc = calculate_refinement(omesh, delta)
 
         if isinstance(handle, om.FaceHandle):
-            insert_inner_vertex(omesh, vertices, handle, scc)
+            vh_new = insert_inner_vertex(omesh, vertices, handle, scc)
         else:
             assert isinstance(handle, om.EdgeHandle)
-            split_edge(omesh, vertices, handle)
+            vh_new = split_edge(omesh, vertices, handle)
 
         # after vertex insertion and possible deletion, restore SCDT criteria
-        flip_until_scdt(omesh)
+        restore_scdt(omesh, vh_new)
 
         # update for next iteration
         delta = find_largest_failing_triangle(omesh)
