@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
 
@@ -57,3 +58,10 @@ def shortest_vector_between_two_lines(line0_ori, line0_dir, line1_ori, line1_dir
 def reverse_u(u, face):
     last_u_parameter = BRepAdaptor_Surface(face).LastUParameter()
     return last_u_parameter - u
+
+def plot_histogram(values, num_of_bins, lower_bound=None, upper_bound=None):
+    if lower_bound is None or upper_bound is None:
+        n, bins, patches = plt.hist(values, num_of_bins, facecolor='blue', alpha=0.5)
+    else:
+        n, bins, patches = plt.hist(values, num_of_bins, range=(lower_bound, upper_bound), facecolor='blue', alpha=0.5)
+    plt.show()
