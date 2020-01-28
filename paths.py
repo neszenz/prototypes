@@ -1,22 +1,48 @@
+import os
+import pathlib
+
+RESOURCE_DIR = '../resources'
+RESULTS_DIR = '../results'
+
+TMP_DIR = os.path.join(RESULTS_DIR, 'tmp')
+
 # original data set collection
-STEP_BOX = '../resources/step/boxWithHole.step'
-STEP_CYLINDER = '../resources/step/cylinder.step'
-STEP_FILLET = '../resources/step/fillet.step'
-STEP_NUT = '../resources/step/hybrid_occ_builtin.step'
-STEP_PIPES = '../resources/step/pipes.step'
-STEP_REVOLVE = '../resources/step/revolve2.step'
-STEP_SPHERE = '../resources/step/spherical_surf.step'
-STEP_SURFFIL = '../resources/step/surface_filling.step'
-STEP_TWIST = '../resources/step/twist.step'
-STEP_TEST1 = '../resources/step/zTest1.step'
-STEP_C0 = '../resources/gmsh_custom/c0.step'
-# abc data set collection
-STEP_42 = '../resources/abc/step/00090042/00090042_1cbd5c59fb8c0895c3599d4d_step_007.step'
-STEP_111 = '../resources/abc/step/00090111/00090111_7eac35f07183d39b4da202d3_step_000.step'
-STEP_99999 = '../resources/abc/step/00099999/00099999_df6629a908dec75f8a69bda7_step_001.step'
-STEP_98613 = '../resources/abc/step/00098613/00098613_56d3ec39e4b0747e94b812ee_step_007.step'
+BOX = os.path.join(RESOURCE_DIR, 'step/boxWithHole.step')
+CYLINDER = os.path.join(RESOURCE_DIR, 'step/cylinder.step')
+FILLET = os.path.join(RESOURCE_DIR, 'step/fillet.step')
+NUT = os.path.join(RESOURCE_DIR, 'step/hybrid_occ_builtin.step')
+PIPES = os.path.join(RESOURCE_DIR, 'step/pipes.step')
+REVOLVE = os.path.join(RESOURCE_DIR, 'step/revolve2.step')
+SPHERE = os.path.join(RESOURCE_DIR, 'step/spherical_surf.step')
+SURFFIL = os.path.join(RESOURCE_DIR, 'step/surface_filling.step')
+TWIST = os.path.join(RESOURCE_DIR, 'step/twist.step')
+TEST1 = os.path.join(RESOURCE_DIR, 'step/zTest1.step')
+
+# custom files
+C0 = os.path.join(RESOURCE_DIR, 'gmsh_custom/c0.step')
+C1 = os.path.join(RESOURCE_DIR, 'gmsh_custom/c1.step')
+
 # corrupt data set
 #STEP_X = '../resources/corrupt/00109971_343538c408e4f4299b3e20a4_step_001.step'
-STEP_X = '../resources/corrupt/00100003_35809b42367c59ffb8aca25e_step_001.step'
+X = '../resources/corrupt/00100003_35809b42367c59ffb8aca25e_step_001.step'
 
-DIR_TMP = '../results/tmp'
+# abc data set collection: 42, 111, 9999, 8613
+def abc(index):
+    assert index >= 0
+    index_str = str(index)
+    assert len(index_str) <= 4
+
+    base_path = os.path.join(RESOURCE_DIR, 'abc/step/')
+    padding = '000'[0:4-len(index_str)]
+    regex_name = '0009' + padding + index_str + '/*.step'
+
+    paths = list(pathlib.Path(base_path).rglob(regex_name))
+    print(RESOURCE_DIR)
+    print(base_path)
+    print(paths)
+    print(padding)
+    print(regex_name)
+    assert not len(paths) == 0
+    assert not len(paths) > 1
+
+    return str(paths[0])

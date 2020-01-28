@@ -27,6 +27,7 @@ from OCC.Core.TopAbs import TopAbs_REVERSED
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 sampler.NUMBER_OF_SAMPLES = 10
+sampler.MIN_NUMBER_OF_SAMPLES = 3
 sampler.INCLUDE_INNER_WIRES = True
 sampler.SIMPLIFY_LINEAR_EDGES = False
 
@@ -34,7 +35,7 @@ MAX_ITERATIONS = -1 # -1 for unlimited
 
 # shape and size test options
 SMALLEST_ANGLE = np.deg2rad(30)
-SKIP_SIZE_TEST = True
+USE_SIZE_TEST = True
 DISTANCE_THRESHOLD = 1.0
 
 PRIORITIZE_AREA         = 0
@@ -48,7 +49,7 @@ SKIP_PPE_DOMAIN_CORNERS = True # skip those with angle smaller than threshold
 PPE_THRESHOLD = SMALLEST_ANGLE#np.deg2rad(60)
 
 # __main__ config
-INPUT_PATH = paths.STEP_SURFFIL
+INPUT_PATH = paths.SURFFIL
 OUTPUT_DIR = paths.DIR_TMP
 
 DEBUG_VERTICES = []
@@ -478,6 +479,9 @@ def find_largest_failing_triangle(omesh):
 
         a_min = alpha if alpha < beta else beta
         a_min = gamma if gamma < a_min else a_min
+        sin_a_min = np.sin(a_min)
+        if sin_a_min == 0.0:
+            raise Exception('calculate_circumradius_v1() error - sin(a_min) is zero')
 
         return l_min / (2 * np.sin(a_min))
     def calculate_circumradius_v2(sv0, sv1, sv2):
@@ -493,6 +497,8 @@ def find_largest_failing_triangle(omesh):
         p01 = p1 - p0
         p02 = p2 - p0
         double_area = np.linalg.norm(np.cross(p01, p02))
+        if double_area == 0.0:
+            raise Exception('calculate_circumradius_v2() error - triangle area is zero')
 
         return (l01*l12*l20) / (2*double_area)
     delta = om.FaceHandle(-1)
@@ -602,6 +608,7 @@ def calculate_refinement(omesh, delta):
         return scc
     def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal):
         def halfedge_crossed_by_ray_shadow(omesh, hh, ray_ori, ray_dir, normal):
+            # print('halfedge_crossed_by_ray_shadow: ', end='')
             assert np.allclose(np.linalg.norm(ray_dir), 1.0)
             assert np.allclose(np.linalg.norm(normal), 1.0)
             p_from = sv_from_vh(omesh, omesh.from_vertex_handle(hh)).XYZ_vec3()
@@ -611,6 +618,7 @@ def calculate_refinement(omesh, delta):
             v_to = shortest_vector_between_two_lines(p_to, normal, ray_ori, ray_dir)
 
             dp = np.dot(v_from, v_to)
+            # print(dp < 0)
 
             return dp < 0
         p_orig = sv_orig.XYZ_vec3()

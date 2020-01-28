@@ -10,7 +10,7 @@ from util import *
 import paths
 
 ## config constants  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-INPUT_DIR = paths.DIR_TMP
+INPUT_DIR = paths.TMP_DIR
 DEFAULT_X = 1280
 DEFAULT_Y = 720
 ZOOM_DEFAULT = 100

@@ -43,7 +43,7 @@ SIMPLIFY_LINEAR_EDGES = False
 REORDER_WIRES_FOR_CLOSEST_ENDPOINTS = True
 
 # __main__ config
-INPUT_PATH = paths.STEP_99999
+INPUT_PATH = paths.C1
 OUTPUT_DIR = paths.DIR_TMP
 
 ## functions = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
@@ -328,8 +328,10 @@ def sample(path):
         _nbs = step_reader.NbShapes()
 
         shape_to_return = step_reader.OneShape()  # a compound
-        if shape_to_return.IsNull():
-            raise AssertionError("Shape is null.")
+        if shape_to_return is None:
+            raise AssertionError("Shape is None.")
+        elif shape_to_return.IsNull():
+            raise AssertionError("Shape is Null.")
 
         return shape_to_return
     print('>> start sampler of type', SAMPLER_TYPES.string_dict[SAMPLER_TYPE])
@@ -371,5 +373,5 @@ def noDoublyLoopInsertions(mesh):
 
 if __name__ == '__main__':
     mesh = sample(INPUT_PATH)
-    print('no doubly vertices per loop:', noDoublyLoopInsertions(mesh))
+    # print('no doubly vertices per loop:', noDoublyLoopInsertions(mesh))
     write_to_file(mesh, OUTPUT_DIR)
