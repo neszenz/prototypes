@@ -44,7 +44,7 @@ REORDER_WIRES_FOR_CLOSEST_ENDPOINTS = True
 
 # __main__ config
 INPUT_PATH = paths.C1
-OUTPUT_DIR = paths.DIR_TMP
+OUTPUT_DIR = paths.TMP_DIR
 
 ## functions = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 def generate_shape_maps(compound):

@@ -50,7 +50,7 @@ PPE_THRESHOLD = SMALLEST_ANGLE#np.deg2rad(60)
 
 # __main__ config
 INPUT_PATH = paths.SURFFIL
-OUTPUT_DIR = paths.DIR_TMP
+OUTPUT_DIR = paths.TMP_DIR
 
 DEBUG_VERTICES = []
 
@@ -456,10 +456,10 @@ def find_largest_failing_triangle(omesh):
             return distance
         t_distance = approximation_distance(sv0, sv1, sv2)
 
-        if SKIP_SIZE_TEST:
-            return True, t_distance
-        else:
+        if USE_SIZE_TEST:
             return t_distance < DISTANCE_THRESHOLD, t_distance
+        else:
+            return True, t_distance
     def calculate_circumradius_v1(sv0, sv1, sv2):
         p0 = sv0.XYZ_vec3()
         p1 = sv1.XYZ_vec3()
@@ -541,7 +541,7 @@ def orientations(p0, p1, p2, px):
 
     return ori0, ori1, ori2
 
-def calculate_refinement(omesh, delta):
+def calculate_refinement(omesh, delta, meta_block):
     def calculate_circumcenter_3d(A, B, C):
         # by 'Oscar Lanzi III' from
         # https://sci.math.narkive.com/nJMeroLe/circumcenter-of-a-3d-triangle
@@ -606,7 +606,7 @@ def calculate_refinement(omesh, delta):
         scc.project_to_XYZ()
 
         return scc
-    def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal):
+    def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal, meta_block):
         def halfedge_crossed_by_ray_shadow(omesh, hh, ray_ori, ray_dir, normal):
             # print('halfedge_crossed_by_ray_shadow: ', end='')
             assert np.allclose(np.linalg.norm(ray_dir), 1.0)
@@ -621,11 +621,14 @@ def calculate_refinement(omesh, delta):
             # print(dp < 0)
 
             return dp < 0
+        meta_block[MeshkD.NT_INVK] += 1
+
         p_orig = sv_orig.XYZ_vec3()
         ray_dir = normalize(c_3d - p_orig)
 
         # halt if we encounter a boundary edge (split case)
         while not omesh.is_boundary(omesh.edge_handle(hh)):
+            meta_block[MeshkD.NT_LOOP] += 1
             hh = omesh.opposite_halfedge_handle(hh)
             fh = omesh.face_handle(hh)
 
@@ -640,6 +643,7 @@ def calculate_refinement(omesh, delta):
                 # shadow apparently crossed the other edge
                 hh = omesh.next_halfedge_handle(hh)
                 assert halfedge_crossed_by_ray_shadow(omesh, hh, p_orig, ray_dir, normal)
+            meta_block[MeshkD.NT_SHAD] += 1
 
         return omesh.edge_handle(hh), None
     hh = omesh.halfedge_handle(delta)
@@ -678,11 +682,11 @@ def calculate_refinement(omesh, delta):
     else:
         raise Exception('calculate_refinement() error - neither inside nor outside')
 
-    handle, scc = travel(omesh, delta, hh_selected, sv_selected, c_3d, c_2d_candidates, normal)
+    handle, scc = travel(omesh, delta, hh_selected, sv_selected, c_3d, c_2d_candidates, normal, meta_block)
 
     return handle, scc
 
-def insert_inner_vertex(omesh, vertices, fh, sv_new):
+def insert_inner_vertex(omesh, vertices, fh, sv_new, meta_block):
     # vertex insert (vertex list and omesh)
     vertices.append(sv_new)
 
@@ -723,6 +727,7 @@ def insert_inner_vertex(omesh, vertices, fh, sv_new):
         om.TriMesh.split(omesh, fh, vh_new)
 
     omesh.garbage_collection()
+    meta_block[MeshkD.NV_INST] += 1
 
     assert all(omesh.point(vh_new) == sv_new.XYZ_vec3())
     return vh_new
@@ -770,7 +775,7 @@ def remove_inner_vertex(omesh, vertices, vh):
 
 #TODO consider inf dist if segment in line of sight
 #TODO imporove encroaching vertices removal performance
-def split_edge(omesh, vertices, eh):
+def split_edge(omesh, vertices, eh, meta_block):
     def remove_encroaching_vertices(omesh, vertices, vh, h):
         def remove_one_encroaching_vertex(omesh, vertices, phw, h):
             for vh in omesh.vertices():
@@ -786,10 +791,11 @@ def split_edge(omesh, vertices, eh):
             return False
         phw = np.array((omesh.point(vh)))
 
+        n_deleted = 0
         while remove_one_encroaching_vertex(omesh, vertices, phw, h):
-            continue
+            n_deleted += 1
 
-        return
+        return n_deleted
     hh = omesh.halfedge_handle(eh, 0)
     vh0 = omesh.from_vertex_handle(hh)
     vh1 = omesh.to_vertex_handle(hh)
@@ -808,11 +814,13 @@ def split_edge(omesh, vertices, eh):
     set_supervertex_property(omesh, vh_new, sv_new)
     omesh.split_edge(eh, vh_new)
     omesh.garbage_collection()
+    meta_block[MeshkD.NV_SPLT] += 1
 
     # remove encroaching vertices
     if omesh.is_boundary(eh):
         h = np.linalg.norm(sv_new.XYZ_vec3() - sv0.XYZ_vec3())
-        remove_encroaching_vertices(omesh, vertices, vh_new, h)
+        n_deleted = remove_encroaching_vertices(omesh, vertices, vh_new, h)
+        meta_block[MeshkD.NV_DELT] += n_deleted
 
     return vh_from_sv(omesh, sv_new)
 
@@ -822,8 +830,8 @@ def parse_back(omesh, face_mesh):
 
     # Supervertices are stored only once in the vertices list and openmesh
     # changes index order eventually during vertex deletion. Therefor the list's
-    # order needs to be updated without overwriting and by that possibly
-    # deleting a supervertex
+    # order needs to be updated without overwriting (to avoid possibly deleting
+    # a supervertex)
     number_of_vertices = len(vertices)
     for vh in omesh.vertices():
         vertices.append(sv_from_vh(omesh, vh))
@@ -841,7 +849,7 @@ def parse_back(omesh, face_mesh):
 
     return
 
-def chew93_Surface(face_mesh):
+def chew93_Surface(face_mesh, meta_block):
     vertices, wire_meshes, triangles, _ = face_mesh
 
     # step 1: compute initial CDT and iteratively transform into SCDT
@@ -857,13 +865,15 @@ def chew93_Surface(face_mesh):
     while delta.is_valid() and iter_counter != MAX_ITERATIONS:
         print('iteration', iter_counter)
 
-        handle, scc = calculate_refinement(omesh, delta)
+        handle, scc = calculate_refinement(omesh, delta, meta_block)
 
         if isinstance(handle, om.FaceHandle):
-            vh_new = insert_inner_vertex(omesh, vertices, handle, scc)
+            vh_new = insert_inner_vertex(omesh, vertices, handle, scc, meta_block)
         else:
             assert isinstance(handle, om.EdgeHandle)
-            vh_new = split_edge(omesh, vertices, handle)
+            vh_new = split_edge(omesh, vertices, handle, meta_block)
+
+        meta_block[MeshkD.NV_REFI] += 1
 
         # after vertex insertion and possible deletion, restore SCDT criteria
         restore_scdt(omesh, vh_new)
@@ -884,16 +894,16 @@ def triangulate(path):
     for f_index in range(mesh.number_of_faces()):
         print('face', f_index+1, 'of', mesh.number_of_faces(), '. . .')
         face_mesh = mesh.face_meshes[f_index]
-        chew93_Surface(face_mesh)
+        meta_block = mesh.meta_blocks[f_index]
+        chew93_Surface(face_mesh, meta_block)
+        print('done after', meta_block[MeshkD.NV_REFI], 'refinements')
 
     mesh.reset_bounding_boxes()
 
     return mesh
 
 if __name__ == '__main__':
-    TMP2 = False
     for TMP in range(1):
         # MAX_ITERATIONS = TMP
         mesh = triangulate(INPUT_PATH)
-        TMP2 = False
         write_to_file(mesh, OUTPUT_DIR)

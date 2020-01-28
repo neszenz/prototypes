@@ -170,6 +170,14 @@ class SuperVertex:
 ## MeshkD  + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 class MeshkD:
     FILE_EXTENSION = '.meshkD'
+    NV_INIT = 'initial vertices: '
+    NV_REFI = 'refinement vertices: '
+    NV_INST = 'inner vertex inserts: '
+    NV_SPLT = 'segment splits: '
+    NV_DELT = 'encroaching vertices deleted: '
+    NT_INVK = 'travel test invokations: '
+    NT_LOOP = 'total travel test loops: '
+    NT_SHAD = 'ray shadow tests: '
 
     def __init__(self, name, face_meshes):
         self.name = name
@@ -177,6 +185,21 @@ class MeshkD:
         self.bounding_box3D = BOUNDING_BOX_DEFAULT
         self.bounding_box2D = BOUNDING_BOX_DEFAULT
         self.reset_bounding_boxes()
+
+        self.meta_blocks = []
+        for face_mesh in self.face_meshes:
+            vertices, _, _, _ = face_mesh
+            meta_block = {
+                MeshkD.NV_INIT:len(vertices),
+                MeshkD.NV_REFI:0,
+                MeshkD.NV_INST:0,
+                MeshkD.NV_SPLT:0,
+                MeshkD.NV_DELT:0,
+                MeshkD.NT_INVK:0,
+                MeshkD.NT_LOOP:0,
+                MeshkD.NT_SHAD:0
+            }
+            self.meta_blocks.append(meta_block)
 
     def number_of_faces(self):
         return len(self.face_meshes)
