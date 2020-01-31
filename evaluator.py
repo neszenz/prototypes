@@ -29,7 +29,7 @@ METRIC_RANGES = {
     METRIC_ANGLES : (0.0, np.pi),
     METRIC_MIN_ANGLES : (0.0, np.pi),
     METRIC_XI : (0.0, np.sqrt(3) / 4),
-    METRIC_RATIO : (0.5, float('inf'))
+    METRIC_RATIO : (1.0/np.sqrt(3), float('inf'))
 }
 
 # __main__ config
@@ -180,7 +180,7 @@ def evaluate_metric(mesh, metric):
 
         values, min_value, max_value = calculate_metric_values(vertices, triangles, metric)
         print(INDENT + 'range: ', end='')
-        print('[', round(np.rad2deg(min_value), 2), end='')
+        print('[', round(np.rad2deg(min_value), 2), sep='', end='')
         print(', ', round(np.rad2deg(max_value), 2), ']', sep='')
 
     if METRIC_HIST_FLAGS[metric]:

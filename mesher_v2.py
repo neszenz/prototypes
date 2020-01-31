@@ -483,7 +483,7 @@ def find_largest_failing_triangle(omesh):
         if PRIORITY_FACTOR == PRIORITIZE_AREA:
             t_size = calculate_area(p0, p1, p2)
         elif PRIORITY_FACTOR == PRIORITIZE_CIRCUMRADIUS:
-            t_size = calculate_circumradius_v2p0, p1, p2)
+            t_size = calculate_circumradius_v2(p0, p1, p2)
         elif PRIORITY_FACTOR == PRIORITIZE_DISTANCE:
             t_size = t_distance
         else:
