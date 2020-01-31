@@ -1,15 +1,36 @@
 from meshkD import SuperVertex, MeshkD, load_from_file
 from util import *
 
-# metric configuration
-METRIC_ANGLES_HIST = False
-METRIX_XI_HIST = False
-METRIX_RATIO_HIST = False
+# metric's constants, flags and configuration
+METRIC_ANGLES     = 0
+METRIC_MIN_ANGLES = 1
+METRIC_XI         = 2
+METRIC_RATIO      = 3
 
-# number of bins for metric histograms
-METRIC_ANGLES_NOB = 53
-METRIX_XI_NOB = 32
-METRIX_RATIO_NOB = METRIX_XI_NOB
+METRIC_NAMES = {
+    METRIC_ANGLES : 'triangle angles',
+    METRIC_MIN_ANGLES : 'trangles\' minimum angles',
+    METRIC_XI : 'normalized area metric (xi-metric)',
+    METRIC_RATIO : 'radius-edge ratio'
+}
+METRIC_HIST_FLAGS = {
+    METRIC_ANGLES : True,
+    METRIC_MIN_ANGLES : True,
+    METRIC_XI : True,
+    METRIC_RATIO : True
+}
+METRIC_NOB = {
+    METRIC_ANGLES : 55,
+    METRIC_MIN_ANGLES : 55,
+    METRIC_XI : 55,
+    METRIC_RATIO : 55
+}
+METRIC_RANGES = {
+    METRIC_ANGLES : (0.0, np.pi),
+    METRIC_MIN_ANGLES : (0.0, np.pi),
+    METRIC_XI : (0.0, np.sqrt(3) / 4),
+    METRIC_RATIO : (0.5, float('inf'))
+}
 
 # __main__ config
 INPUT_PATH = '../results/tmp/200128_190446.meshkD'
@@ -51,9 +72,34 @@ def basic_information(mesh):
 
     return
 
-def triangle_angle_metric(mesh):
+def calculate_metric_values(vertices, triangles, metric):
     def calculate_all_angles(vertices, triangles):
-        angles = []
+        angle_list = []
+        min_angle = float('inf')
+        max_angle = float('-inf')
+
+        for (i0, i1, i2) in triangles:
+            sv0 = vertices[i0]
+            sv1 = vertices[i1]
+            sv2 = vertices[i2]
+
+            a0 = calculate_angle_in_corner(sv2.XYZ_vec3(), sv0.XYZ_vec3(), sv1.XYZ_vec3())
+            a1 = calculate_angle_in_corner(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+            a2 = calculate_angle_in_corner(sv1.XYZ_vec3(), sv2.XYZ_vec3(), sv0.XYZ_vec3())
+
+            min_a = min(a0, a1, a2)
+            max_a = max(a0, a1, a2)
+
+            if min_a < min_angle:
+                min_angle = min_a
+            if max_a > max_angle:
+                max_angle = max_a
+
+            angle_list += [a0, a1, a2]
+
+        return angle_list, min_angle, max_angle
+    def calculate_min_angles(vertices, triangles):
+        min_angle_list = []
         min_angle = float('inf')
         max_angle = float('-inf')
 
@@ -69,52 +115,13 @@ def triangle_angle_metric(mesh):
             min_a = min(a0, a1, a2)
             if min_a < min_angle:
                 min_angle = min_a
-            max_a = max(a0, a1, a2)
-            if max_a > max_angle:
-                max_angle = max_a
+            if min_a > max_angle:
+                max_angle = min_a
 
-            angles += [a0, a1, a2]
+            min_angle_list.append(min_a)
 
-        return angles, min_angle, max_angle
-    print('\n -- trangle angles --')
-
-    num_of_faces = mesh.number_of_faces()
-    for i_face in range(mesh.number_of_faces()):
-        vertices, _, triangles, _ = mesh.face_meshes[i_face]
-        print('face_mesh ', i_face+1, ' of ', num_of_faces, ':', sep='')
-
-        angles, min_angle, max_angle = calculate_all_angles(vertices, triangles)
-        print(INDENT + 'range of angles: ', end='')
-        print('[', round(np.rad2deg(min_angle), 2), end='')
-        print(', ', round(np.rad2deg(max_angle), 2), ']', sep='')
-
-        if METRIC_ANGLES_HIST:
-            angles_degree = [np.rad2deg(a) for a in angles]
-            lower_bound = 0.0
-            upper_bound = 180.0
-            plot_histogram(angles_degree, METRIC_ANGLES_NOB, lower_bound, upper_bound)
-
-    return
-
-def normalized_area_metric(mesh):
+        return min_angle_list, min_angle, max_angle
     def calculate_xi_for_all_triangles(vertices, triangles):
-        def calculate_xi_for_triangle(p0, p1, p2):
-            l0 = np.linalg.norm(p1 - p0)
-            l1 = np.linalg.norm(p2 - p1)
-            l2 = np.linalg.norm(p0 - p2)
-            assert min(l0, l1, l2) > 0.0
-
-            # normalize for longest edge
-            lmax = max(l0, l1, l2)
-            l0 /= lmax
-            l1 /= lmax
-            l2 /= lmax
-
-            # xi now is the area (via heron's formula) for normalized side lengths
-            s = 0.5 * (l0 + l1 + l2)
-            xi = np.sqrt(s*(s-l0)*(s-l1)*(s-l2))
-
-            return xi
         xi_list = []
         min_xi = float('inf')
         max_xi = float('-inf')
@@ -124,7 +131,7 @@ def normalized_area_metric(mesh):
             sv1 = vertices[i1]
             sv2 = vertices[i2]
 
-            xi = calculate_xi_for_triangle(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+            xi = calculate_xi(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
             if xi < min_xi:
                 min_xi = xi
             if xi > max_xi:
@@ -133,42 +140,7 @@ def normalized_area_metric(mesh):
             xi_list.append(xi)
 
         return xi_list, min_xi, max_xi
-    print('\n -- normalized area metric (xi-metric) --')
-
-    num_of_faces = mesh.number_of_faces()
-    for i_face in range(mesh.number_of_faces()):
-        vertices, _, triangles, _ = mesh.face_meshes[i_face]
-        print('face_mesh ', i_face+1, ' of ', num_of_faces, ':', sep='')
-
-        xi_list, min_xi, max_xi = calculate_xi_for_all_triangles(vertices, triangles)
-        print(INDENT + 'range of xi: ', end='')
-        print('[', round(min_xi, 2), ', ', round(max_xi, 2), ']', sep='')
-
-        if METRIX_XI_HIST:
-            lower_bound = 0.0
-            upper_bound = np.sqrt(3) / 4
-            plot_histogram(xi_list, METRIX_XI_NOB, lower_bound, upper_bound)
-
-    return
-
-def radius_edge_ratio(mesh):
     def calculate_ratio_for_all_triangles(vertices, triangles):
-        def calculate_ratio_for_triangle(p0, p1, p2):
-            # based on https://artofproblemsolving.com/wiki/index.php/Circumradius
-            l01 = np.linalg.norm(p1 - p0)
-            l12 = np.linalg.norm(p2 - p1)
-            l20 = np.linalg.norm(p0 - p2)
-
-            p01 = p1 - p0
-            p02 = p2 - p0
-            double_area = np.linalg.norm(np.cross(p01, p02))
-            assert double_area > 0.0
-
-            circumradius = (l01*l12*l20) / (2*double_area)
-            l_min = min(l01, l12, l20)
-            assert l_min > 0.0
-
-            return circumradius / l_min
         ratio_list = []
         min_ratio = float('inf')
         max_ratio = float('-inf')
@@ -178,7 +150,7 @@ def radius_edge_ratio(mesh):
             sv1 = vertices[i1]
             sv2 = vertices[i2]
 
-            ratio = calculate_ratio_for_triangle(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+            ratio = calculate_radius_edge_ratio_v2(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
             if ratio < min_ratio:
                 min_ratio = ratio
             if ratio > max_ratio:
@@ -187,21 +159,32 @@ def radius_edge_ratio(mesh):
             ratio_list.append(ratio)
 
         return ratio_list, min_ratio, max_ratio
-    print('\n -- radius-edge ratio --')
+    if metric == METRIC_ANGLES:
+        return calculate_all_angles(vertices, triangles)
+    elif metric == METRIC_MIN_ANGLES:
+        return calculate_min_angles(vertices, triangles)
+    elif metric == METRIC_XI:
+        return calculate_xi_for_all_triangles(vertices, triangles)
+    elif metric == METRIC_RATIO:
+        return calculate_ratio_for_all_triangles(vertices, triangles)
+    else:
+        raise Exception('calculate_metric_values() error - unknown metric')
+
+def evaluate_metric(mesh, metric):
+    print('\n -- ' + METRIC_NAMES[metric] + ' --')
 
     num_of_faces = mesh.number_of_faces()
-    for i_face in range(mesh.number_of_faces()):
+    for i_face in range(num_of_faces):
         vertices, _, triangles, _ = mesh.face_meshes[i_face]
         print('face_mesh ', i_face+1, ' of ', num_of_faces, ':', sep='')
 
-        ratio_list, min_ratio, max_ratio = calculate_ratio_for_all_triangles(vertices, triangles)
-        print(INDENT + 'range of ratio: ', end='')
-        print('[', round(min_ratio, 2), ', ', round(max_ratio, 2), ']', sep='')
+        values, min_value, max_value = calculate_metric_values(vertices, triangles, metric)
+        print(INDENT + 'range: ', end='')
+        print('[', round(np.rad2deg(min_value), 2), end='')
+        print(', ', round(np.rad2deg(max_value), 2), ']', sep='')
 
-        if METRIX_RATIO_HIST:
-            lower_bound = 0.0
-            upper_bound = max(ratio_list) #TODO does finite upper bound exist?
-            plot_histogram(ratio_list, METRIX_RATIO_NOB, lower_bound, upper_bound)
+    if METRIC_HIST_FLAGS[metric]:
+        plot_histogram(values, METRIC_NAMES[metric], METRIC_NOB[metric], METRIC_RANGES[metric])
 
     return
 
@@ -211,11 +194,10 @@ def evaluate(path):
 
     basic_information(mesh)
 
-    triangle_angle_metric(mesh)
-
-    normalized_area_metric(mesh)
-
-    radius_edge_ratio(mesh)
+    evaluate_metric(mesh, METRIC_ANGLES)
+    evaluate_metric(mesh, METRIC_MIN_ANGLES)
+    evaluate_metric(mesh, METRIC_XI)
+    evaluate_metric(mesh, METRIC_RATIO)
 
     print('')
     return

@@ -36,7 +36,7 @@ MAX_ITERATIONS = -1 # -1 for unlimited
 # shape and size test options
 SMALLEST_ANGLE = np.deg2rad(30)
 USE_SIZE_TEST = True
-DISTANCE_THRESHOLD = 1.0
+DISTANCE_THRESHOLD = 5.0
 
 PRIORITIZE_AREA         = 0
 PRIORITIZE_CIRCUMRADIUS = 1
@@ -460,52 +460,14 @@ def find_largest_failing_triangle(omesh):
             return t_distance < DISTANCE_THRESHOLD, t_distance
         else:
             return True, t_distance
-    def calculate_circumradius_v1(sv0, sv1, sv2):
-        p0 = sv0.XYZ_vec3()
-        p1 = sv1.XYZ_vec3()
-        p2 = sv2.XYZ_vec3()
-
-        # based on book 'Delaunay Mesh Generation' page 26
-        l01 = np.linalg.norm(p1 - p0)
-        l12 = np.linalg.norm(p2 - p1)
-        l20 = np.linalg.norm(p0 - p2)
-
-        l_min = l01 if l01 < l12 else l12
-        l_min = l20 if l20 < l_min else l_min
-
-        alpha = calculate_angle_in_corner(p2, p0, p1)
-        beta = calculate_angle_in_corner(p0, p1, p2)
-        gamma = calculate_angle_in_corner(p1, p2, p0)
-
-        a_min = alpha if alpha < beta else beta
-        a_min = gamma if gamma < a_min else a_min
-        sin_a_min = np.sin(a_min)
-        if sin_a_min == 0.0:
-            raise Exception('calculate_circumradius_v1() error - sin(a_min) is zero')
-
-        return l_min / (2 * np.sin(a_min))
-    def calculate_circumradius_v2(sv0, sv1, sv2):
-        p0 = sv0.XYZ_vec3()
-        p1 = sv1.XYZ_vec3()
-        p2 = sv2.XYZ_vec3()
-
-        # based on https://artofproblemsolving.com/wiki/index.php/Circumradius
-        l01 = np.linalg.norm(p1 - p0)
-        l12 = np.linalg.norm(p2 - p1)
-        l20 = np.linalg.norm(p0 - p2)
-
-        p01 = p1 - p0
-        p02 = p2 - p0
-        double_area = np.linalg.norm(np.cross(p01, p02))
-        if double_area == 0.0:
-            raise Exception('calculate_circumradius_v2() error - triangle area is zero')
-
-        return (l01*l12*l20) / (2*double_area)
     delta = om.FaceHandle(-1)
     delta_size = float('-inf')
 
     for fh in omesh.faces():
         sv0, sv1, sv2 = collect_triangle_supervertices(omesh, fh)
+        p0 = sv0.XYZ_vec3()
+        p1 = sv1.XYZ_vec3()
+        p2 = sv2.XYZ_vec3()
 
         if SKIP_ALL_DOMAIN_CORNERS and is_domain_corner(omesh, sv0, sv1, sv2):
             continue
@@ -519,9 +481,9 @@ def find_largest_failing_triangle(omesh):
             continue
 
         if PRIORITY_FACTOR == PRIORITIZE_AREA:
-            t_size = calculate_area(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+            t_size = calculate_area(p0, p1, p2)
         elif PRIORITY_FACTOR == PRIORITIZE_CIRCUMRADIUS:
-            t_size = calculate_circumradius_v2(sv0, sv1, sv2)
+            t_size = calculate_circumradius_v2p0, p1, p2)
         elif PRIORITY_FACTOR == PRIORITIZE_DISTANCE:
             t_size = t_distance
         else:
