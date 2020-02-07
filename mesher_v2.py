@@ -14,6 +14,7 @@ from gerobust import wrapper
 import numpy as np
 import triangle as shewchuk_triangle
 import openmesh as om
+import sys
 
 import paths
 import sampler
@@ -36,7 +37,7 @@ MAX_ITERATIONS = -1 # -1 for unlimited
 # shape and size test options
 SMALLEST_ANGLE = np.deg2rad(30)
 USE_SIZE_TEST = False
-DISTANCE_THRESHOLD = 0.01
+DISTANCE_THRESHOLD = 0.05
 
 PRIORITIZE_AREA         = 0
 PRIORITIZE_CIRCUMRADIUS = 1
@@ -569,6 +570,16 @@ def calculate_refinement(omesh, delta, meta_block):
 
         return scc
     def travel(omesh, delta, hh, c_3d, c_2d_candidates, normal, meta_block):
+        def traveled_too_far(omesh, hh, p_orig, ray_dir):
+            vh_opposite = omesh.to_vertex_handle(hh)
+            p_opposite = sv_from_vh(omesh, vh_opposite).XYZ_vec3()
+            p_opposite -= p_orig # move system to origin
+
+            p_projected = np.abs(np.dot(p_opposite, ray_dir))
+            if p_projected > 1.0:
+                print('traveled too far:', p_projected)
+
+            return p_projected > 1.0
         def halfedge_crossed_by_ray_shadow(omesh, hh, ray_ori, ray_dir, normal):
             # print('halfedge_crossed_by_ray_shadow: ', end='')
             assert np.allclose(np.linalg.norm(ray_dir), 1.0)
@@ -594,6 +605,7 @@ def calculate_refinement(omesh, delta, meta_block):
         # halt if we encounter a boundary edge (split case)
         while not omesh.is_boundary(omesh.edge_handle(hh)):
             meta_block[MeshkD.NT_LOOP] += 1
+            # get inside neighboring triangle
             hh = omesh.opposite_halfedge_handle(hh)
             fh = omesh.face_handle(hh)
 
@@ -602,8 +614,12 @@ def calculate_refinement(omesh, delta, meta_block):
             if inside_index >= 0:
                 return fh, scc_from_c_2d(c_2d_candidates[inside_index], sv_orig)
 
+            hh = omesh.next_halfedge_handle(hh) # go to first of the opposite halfedges
+
+            if traveled_too_far(omesh, hh, p_orig, ray_dir):
+                pass
+
             # which of the remaining edges is crossed to travel further in that direction
-            hh = omesh.next_halfedge_handle(hh)
             if not halfedge_crossed_by_ray_shadow(omesh, hh, p_orig, ray_dir, normal):
                 # shadow apparently crossed the other edge
                 hh = omesh.next_halfedge_handle(hh)
@@ -623,7 +639,19 @@ def calculate_refinement(omesh, delta, meta_block):
 
     normal = calculate_normal_normalized(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
     c_3d = calculate_circumcenter_3d(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+    #TODO remove
+    # if iter_counter == 20:
+    #     sv_c_3d = SuperVertex(*c_3d, same_as=sv0)
+    #     sv_c_3d.project_to_UV()
+    #     DEBUG_VERTICES.append(sv_c_3d)
+    #TODO remove
     c_2d_candidates = calculate_circumcenter_2d_candidates(c_3d, normal, sv0.face)
+    #TODO remove
+    # if iter_counter == 20:
+    #     for (u, v) in c_2d_candidates:
+    #         sv_c_2d = SuperVertex(u=u, v=v, same_as=sv0)
+    #         # DEBUG_VERTICES.append(sv_c_2d)
+    #TODO remove
 
     # test if surface circumcenter is in delta
     inside_index = find_point_inside(omesh, delta, c_2d_candidates)
@@ -815,17 +843,27 @@ def chew93_Surface(face_mesh, meta_block):
     vertices, wire_meshes, triangles, _ = face_mesh
 
     # step 1: compute initial CDT and iteratively transform into SCDT
+    print('generating initial mesh...', end='')
+    sys.stdout.flush()
     triangulate_cdt(face_mesh)
     omesh = parse_into_openmesh(face_mesh)
     flip_until_scdt(omesh)
 
     # step 2+3: find largest triangle that fails shape ans size criteria
+    print('\b\b\b - done!\nrefining mesh...')
     delta = find_largest_failing_triangle(omesh)
 
     global iter_counter
     iter_counter = 0
     while delta.is_valid() and iter_counter != MAX_ITERATIONS:
         print('iteration', iter_counter)
+        #TODO remove
+        # if iter_counter == 20:
+        #     sv0, sv1, sv2 = collect_triangle_supervertices(omesh, delta)
+        #     (x, y, z), (u, v) = calculate_cog(sv0, sv1, sv2)
+        #     sv_cog = SuperVertex(x, y, z, u, v, same_as=sv0)
+        #     DEBUG_VERTICES.append(sv_cog)
+        #TODO remove
 
         handle, scc = calculate_refinement(omesh, delta, meta_block)
 
