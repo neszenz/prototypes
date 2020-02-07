@@ -18,13 +18,21 @@ SURFFIL = os.path.join(RESOURCE_DIR, 'step/surface_filling.step')
 TWIST = os.path.join(RESOURCE_DIR, 'step/twist.step')
 TEST1 = os.path.join(RESOURCE_DIR, 'step/zTest1.step')
 
-# custom files
-C0 = os.path.join(RESOURCE_DIR, 'gmsh_custom/c0.step')
-C1 = os.path.join(RESOURCE_DIR, 'gmsh_custom/c1.step')
-
 # corrupt data set
 #STEP_X = '../resources/corrupt/00109971_343538c408e4f4299b3e20a4_step_001.step'
 X = '../resources/corrupt/00100003_35809b42367c59ffb8aca25e_step_001.step'
+
+# custom files created with gmsh
+def custom(index):
+    assert index >= 0
+
+    base_path = os.path.join(RESOURCE_DIR, 'gmsh_custom/')
+    file_name = 'c'+str(index)+'.step'
+
+    paths = list(pathlib.Path(base_path).rglob(file_name))
+    assert len(paths) == 1
+
+    return str(paths[0])
 
 # abc data set collection: 42, 111, 9999, 8613
 def abc(index):
@@ -37,11 +45,6 @@ def abc(index):
     regex_name = '0009' + padding + index_str + '/*.step'
 
     paths = list(pathlib.Path(base_path).rglob(regex_name))
-    print(RESOURCE_DIR)
-    print(base_path)
-    print(paths)
-    print(padding)
-    print(regex_name)
     assert not len(paths) == 0
     assert not len(paths) > 1
 

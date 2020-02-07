@@ -50,15 +50,18 @@ SURFACE_TYPE_STRINGS = {
 
 ## SuperVertex + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 class SuperVertex:
-    def __init__(self, x=0.0, y=0.0, z=0.0, u=0.0, v=0.0):
+    def __init__(self, x=0.0, y=0.0, z=0.0, u=0.0, v=0.0, same_as=None):
         self.x = x
         self.y = y
         self.z = z
         self.u = u
         self.v = v
 
-        self.face_id = 0
-        self.face = None
+        if same_as is None:
+            self.face_id = 0
+            self.face = None
+        else:
+            self.set_same_face_as(same_as)
 
         # None: inner vertex
         # len-1-list: vertex on boundary

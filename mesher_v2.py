@@ -35,8 +35,8 @@ MAX_ITERATIONS = -1 # -1 for unlimited
 
 # shape and size test options
 SMALLEST_ANGLE = np.deg2rad(30)
-USE_SIZE_TEST = True
-DISTANCE_THRESHOLD = 5.0
+USE_SIZE_TEST = False
+DISTANCE_THRESHOLD = 0.01
 
 PRIORITIZE_AREA         = 0
 PRIORITIZE_CIRCUMRADIUS = 1
@@ -49,7 +49,7 @@ SKIP_PPE_DOMAIN_CORNERS = True # skip those with angle smaller than threshold
 PPE_THRESHOLD = SMALLEST_ANGLE#np.deg2rad(60)
 
 # __main__ config
-INPUT_PATH = paths.SURFFIL
+INPUT_PATH = paths.custom(2)
 OUTPUT_DIR = paths.TMP_DIR
 
 DEBUG_VERTICES = []
@@ -568,7 +568,7 @@ def calculate_refinement(omesh, delta, meta_block):
         scc.project_to_XYZ()
 
         return scc
-    def travel(omesh, delta, hh, sv_orig, c_3d, c_2d_candidates, normal, meta_block):
+    def travel(omesh, delta, hh, c_3d, c_2d_candidates, normal, meta_block):
         def halfedge_crossed_by_ray_shadow(omesh, hh, ray_ori, ray_dir, normal):
             # print('halfedge_crossed_by_ray_shadow: ', end='')
             assert np.allclose(np.linalg.norm(ray_dir), 1.0)
@@ -585,6 +585,9 @@ def calculate_refinement(omesh, delta, meta_block):
             return dp < 0
         meta_block[MeshkD.NT_INVK] += 1
 
+        svh0 = sv_from_vh(omesh, omesh.from_vertex_handle(hh))
+        svh1 = sv_from_vh(omesh, omesh.to_vertex_handle(hh))
+        sv_orig = SuperVertex.compute_halfway(svh0, svh1)
         p_orig = sv_orig.XYZ_vec3()
         ray_dir = normalize(c_3d - p_orig)
 
@@ -633,18 +636,15 @@ def calculate_refinement(omesh, delta, meta_block):
     angle2 = calculate_angle_in_corner(sv1.XYZ_vec3(), sv2.XYZ_vec3(), sv0.XYZ_vec3())
 
     if angle0 > angle1 and angle0 > angle2:
-        sv_selected = sv0
         hh_selected = hh
     elif angle1 > angle0 and angle1 > angle2:
-        sv_selected = sv1
         hh_selected = omesh.next_halfedge_handle(hh)
     elif angle2 > angle0 and angle2 > angle1:
-        sv_selected = sv2
         hh_selected = omesh.prev_halfedge_handle(hh)
     else:
         raise Exception('calculate_refinement() error - neither inside nor outside')
 
-    handle, scc = travel(omesh, delta, hh_selected, sv_selected, c_3d, c_2d_candidates, normal, meta_block)
+    handle, scc = travel(omesh, delta, hh_selected, c_3d, c_2d_candidates, normal, meta_block)
 
     return handle, scc
 
@@ -707,7 +707,7 @@ def remove_inner_vertex(omesh, vertices, vh):
         omesh.garbage_collection()
 
         return
-    print('remove_inner_vertex()')
+    # print('remove_inner_vertex()')
     assert sv_from_vh(omesh, vh).edges_with_p is None
     assert not omesh.is_boundary(vh)
 

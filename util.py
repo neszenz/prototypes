@@ -33,6 +33,15 @@ def calculate_normal_normalized(p0, p1, p2):
 def calculate_area(p0, p1, p2):
     return np.linalg.norm(calculate_normal(p0, p1, p2)) / 2.0
 
+def calculate_cog_2d(sv0, sv1, sv2):
+    return (sv0.UV_vec2() + sv1.UV_vec2() + sv2.UV_vec2()) / 3
+
+def calculate_cog_3d(sv0, sv1, sv2):
+    return (sv0.XYZ_vec3() + sv1.XYZ_vec3() + sv2.XYZ_vec3()) / 3
+
+def calculate_cog(sv0, sv1, sv2):
+    return calculate_cog_3d(sv0, sv1, sv2), calculate_cog_2d(sv0, sv1, sv2)
+
 def left_hand_perpendicular(v):
     assert len(v) == 2
     return np.array((v[1], -v[0]))
