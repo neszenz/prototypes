@@ -31,7 +31,7 @@ sampler.SAMPLER_TYPE = sampler.SAMPLER_TYPES.ADAPTIVE
 sampler.MIN_NUMBER_OF_SAMPLES = 3
 sampler.NUMBER_OF_SAMPLES = 5
 sampler.PARAMETERIZE_FOR_ARC_LENGTH = False
-sampler.ADAPTIVE_REFINEMENT_FACTOR = 0.02
+sampler.ADAPTIVE_REFINEMENT_FACTOR = 0.005
 sampler.INCLUDE_INNER_WIRES = True
 sampler.SIMPLIFY_LINEAR_EDGES = False
 
@@ -40,7 +40,9 @@ MAX_ITERATIONS = -1 # -1 for unlimited
 # shape and size test options
 SMALLEST_ANGLE = np.deg2rad(30)
 USE_SIZE_TEST = True
-DISTANCE_THRESHOLD = 0.02
+DISTANCE_THRESHOLD = 0.01
+APPROX_DIST_MULTI_SAMPLING = True
+APPROX_DIST_AREA_WRIGHTED = False
 
 PRIORITIZE_AREA         = 0
 PRIORITIZE_CIRCUMRADIUS = 1
@@ -448,16 +450,33 @@ def find_largest_failing_triangle(omesh):
         return min(alpha, beta, gamma) > SMALLEST_ANGLE
     def size_test(sv0, sv1, sv2):
         def approximation_distance(sv0, sv1, sv2):
-            cog_2d = (sv0.UV_vec2() + sv1.UV_vec2() + sv2.UV_vec2()) / 3
-            sv_cog = SuperVertex(u=cog_2d[0], v=cog_2d[1])
-            sv_cog.set_same_face_as(sv0)
-            sv_cog.project_to_XYZ()
-
+            # center-of-gravity distance
+            sv_cog = SuperVertex.compute_surface_center_of_gravity(sv0, sv1, sv2)
             cog_surface = sv_cog.XYZ_vec3()
             cog_3d = (sv0.XYZ_vec3() + sv1.XYZ_vec3() + sv2.XYZ_vec3()) / 3
-            distance = np.linalg.norm(cog_surface - cog_3d)
+            cog_distance = np.linalg.norm(cog_surface - cog_3d)
 
-            return distance
+            distance = cog_distance
+
+            if APPROX_DIST_MULTI_SAMPLING:
+                # halfway-point distances
+                hw0_surface = SuperVertex.compute_halfway(sv0, sv1).XYZ_vec3()
+                hw1_surface = SuperVertex.compute_halfway(sv1, sv2).XYZ_vec3()
+                hw2_surface = SuperVertex.compute_halfway(sv2, sv0).XYZ_vec3()
+                hw0_3d = sv0.XYZ_vec3() + ((sv1.XYZ_vec3()-sv0.XYZ_vec3()) / 2)
+                hw1_3d = sv1.XYZ_vec3() + ((sv2.XYZ_vec3()-sv1.XYZ_vec3()) / 2)
+                hw2_3d = sv2.XYZ_vec3() + ((sv0.XYZ_vec3()-sv2.XYZ_vec3()) / 2)
+                hw0_distance = np.linalg.norm(hw0_surface - hw0_3d)
+                hw1_distance = np.linalg.norm(hw1_surface - hw1_3d)
+                hw2_distance = np.linalg.norm(hw2_surface - hw2_3d)
+
+                distance = (distance + hw0_distance + hw1_distance + hw2_distance) / 4
+
+            if APPROX_DIST_AREA_WRIGHTED:
+                area = calculate_area(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+                distance /= area**0.5
+
+            return distance**2
         t_distance = approximation_distance(sv0, sv1, sv2)
 
         if USE_SIZE_TEST:
@@ -853,13 +872,13 @@ def chew93_Surface(face_mesh, meta_block):
     flip_until_scdt(omesh)
 
     # step 2+3: find largest triangle that fails shape ans size criteria
-    print('\b\b\b - done!\nrefining mesh...')
+    print('\b\b\b - done\nrefining mesh...', end='')
     delta = find_largest_failing_triangle(omesh)
 
     global iter_counter
     iter_counter = 0
     while delta.is_valid() and iter_counter != MAX_ITERATIONS:
-        print('iteration', iter_counter)
+        print('\rrefining mesh... iteration', iter_counter, end='')
         #TODO remove
         # if iter_counter == 20:
         #     sv0, sv1, sv2 = collect_triangle_supervertices(omesh, delta)
@@ -899,7 +918,7 @@ def triangulate(path):
         face_mesh = mesh.face_meshes[f_index]
         meta_block = mesh.meta_blocks[f_index]
         chew93_Surface(face_mesh, meta_block)
-        print('done after', meta_block[MeshkD.NV_REFI], 'refinements')
+        print('\rrefining mesh - done (after', meta_block[MeshkD.NV_REFI], 'iterations)')
 
     mesh.reset_bounding_boxes()
 

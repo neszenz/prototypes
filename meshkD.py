@@ -73,6 +73,14 @@ class SuperVertex:
         self.face_id = other.face_id
         return
 
+    def compute_surface_center_of_gravity(sv0, sv1, sv2):
+        cog_2d = (sv0.UV_vec2() + sv1.UV_vec2() + sv2.UV_vec2()) / 3
+        sv_cog = SuperVertex(u=cog_2d[0], v=cog_2d[1])
+        sv_cog.set_same_face_as(sv0)
+        sv_cog.project_to_XYZ()
+
+        return sv_cog
+
     def compute_halfway_on_shared_edge(sv0, sv1):
         def get_shared_edge(sv0, sv1):
             for sv0_edge_with_p in sv0.edges_with_p:
@@ -118,8 +126,7 @@ class SuperVertex:
         p1 = sv1.UV_vec2()
         phw = p0 + ((p1-p0)/2)
         sv_halfway = SuperVertex(u=phw[0], v=phw[1])
-        sv_halfway.face_id = sv0.face_id
-        sv_halfway.face = sv0.face
+        sv_halfway.set_same_face_as(sv0)
         sv_halfway.project_to_XYZ()
 
         return sv_halfway
