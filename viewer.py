@@ -19,8 +19,9 @@ SAVE_ZONE_FACTOR = 0.7 # scale weight for model size to window ratio
 ROTATION_STEP_SLOW = 1
 ROTATION_STEP_FAST = 5
 TILT_DEFAULT = 0
+COLOR_BACKGROUND = np.array((1.0, 1.0, 1.0))
 COLOR_WIREFRAME = np.array((0.6, 0.6, 0.6))
-COLOR_BOUNDARY = np.array((1.0, 1.0, 1.0))
+COLOR_BOUNDARY = np.array((0.0, 0.0, 0.0))
 COLOR_BBOX = np.array((0.5, 0.5, 0.0))
 COLOR_VERTICES = np.array((1.0, 0.0, 0.0))
 
@@ -37,6 +38,7 @@ flags = {
     'draw_vertices' : True,
     'draw_mesh1D' : True,
     'draw_mesh2D' : True,
+    'draw_labels' : True,
     'flat_shading' : False,
     'cull_faces' : False,
     'draw_2d_mode' : False,
@@ -170,6 +172,8 @@ def on_key_press(symbol, modifiers):
             apply_to_mesh_index(-1)
         if symbol == key.K:
             apply_to_mesh_index(1)
+        if symbol == key.L:
+            flags['draw_labels'] = not flags['draw_labels']
         if symbol == key.C:
             reset()
         if symbol == key.V:
@@ -223,8 +227,9 @@ def on_draw():
         set_projection(window.width)
         text = '<no meshes found in directory \'' + INPUT_DIR + '\'>'
         font_size = 14
-        label = pyglet.text.Label(text, font_name='Arial', font_size=font_size,
-                                  x=0.0, y=0.0, anchor_x='center', anchor_y='center')
+        label = pyglet.text.Label(text, font_name='Arial', font_size=font_size,\
+                                  color=(0, 0, 0, 255), x=0.0, y=0.0,\
+                                  anchor_x='center', anchor_y='center')
         label.draw()
     def config_opengl(mesh):
         def set_modelview(mesh):
@@ -446,7 +451,6 @@ def on_draw():
 
         current_face_collection = []
 
-        glPointSize(4.0)
         glBegin(GL_POINTS)
 
         glColor3f(*COLOR_VERTICES)
@@ -500,9 +504,12 @@ def on_draw():
             y_max = window.height//2
             y_pos = (y_max - padding) - label_id * (font_size + padding)
 
-            label = pyglet.text.Label(text, font_name='Arial', font_size=font_size,
-                                      x=x_pos, y=y_pos, anchor_x='left', anchor_y='top')
+            label = pyglet.text.Label(text, font_name='Arial', font_size=font_size,\
+                                      color=(0, 0, 0, 255), x=x_pos, y=y_pos,\
+                                      anchor_x='left', anchor_y='top')
             label.draw()
+        if not flags['draw_labels']:
+            return
         global gvars
         glDisable(GL_DEPTH_TEST)
         glMatrixMode(GL_MODELVIEW)
@@ -520,7 +527,10 @@ def on_draw():
     global flags, gvars
 
     window.set_caption(window_caption)
+    glClearColor(*COLOR_BACKGROUND, 1.0)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glLineWidth(1.0)
+    glPointSize(4.0)
 
     if len(meshes) == 0:
         draw_no_meshes_msg()
