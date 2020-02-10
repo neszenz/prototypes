@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
+from OCC.Core.GCPnts import GCPnts_AbscissaPoint
 
 def normalize(vector):
     vNorm = np.linalg.norm(vector)
@@ -49,6 +50,18 @@ def left_hand_perpendicular(v):
 def project_point_onto_normalized_vector(p, v):
     return np.dot(p, v) * v
 
+def calculate_projection_distance(sv_line0, sv_line1, sv_point):
+    # en.wikipedia.org/wiki/Distance_from_a_point_to_a_line#Vector_formulation
+    a = sv_line0.XYZ_vec3()
+    b = sv_line1.XYZ_vec3()
+    n = normalize(b - a)
+    p = sv_point.XYZ_vec3()
+
+    pa = a - p
+    distance = np.linalg.norm(pa - np.dot(pa, n) * n)
+
+    return distance
+
 # assuming all arguments are numpy arrays and the directions are normalized
 def shortest_vector_between_two_lines(line0_ori, line0_dir, line1_ori, line1_dir):
     # set up and solve linear equation
@@ -67,6 +80,13 @@ def shortest_vector_between_two_lines(line0_ori, line0_dir, line1_ori, line1_dir
 def reverse_u(u, face):
     last_u_parameter = BRepAdaptor_Surface(face).LastUParameter()
     return last_u_parameter - u
+
+def calculate_arc_length(curve):
+    fp = curve.FirstParameter()
+    lp = curve.LastParameter()
+    arc_length = GCPnts_AbscissaPoint.Length(curve, fp, lp)
+
+    return arc_length
 
 def plot_histogram(values, name, num_of_bins, bounds):
     lower_bound, upper_bound = bounds

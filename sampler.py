@@ -9,10 +9,13 @@ This leads to the representation as described in meshkD.py.
 """
 import os
 import numpy as np
+import matplotlib.pyplot as plt
 
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Curve2d, BRepAdaptor_Surface
 from OCC.Core.gp import gp_Pnt, gp_Vec
+from OCC.Core.GCPnts import GCPnts_AbscissaPoint
+from OCC.Core.GeomAbs import GeomAbs_Line
 from OCC.Core.IFSelect import IFSelect_RetDone, IFSelect_ItemsByEntity
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from OCC.Core.ShapeAnalysis import shapeanalysis
@@ -25,17 +28,23 @@ from OCC.Extend.TopologyUtils import TopologyExplorer
 
 import paths
 from meshkD import SuperVertex, MeshkD, write_to_file
+from util import *
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 class SAMPLER_TYPES: # enum for calling sampler factory
-    SIMPLE = 0
+    SIMPLE   = 0 # monotonous step width sampling
+    ADAPTIVE = 1 # curvature adaptive sampling
     string_dict = {
         SIMPLE:'SIMPLE',
+        ADAPTIVE:'ADAPTIVE'
     }
 
-SAMPLER_TYPE = SAMPLER_TYPES.SIMPLE
-NUMBER_OF_SAMPLES = 10 # only for SIMPLE sampling method
+SAMPLER_TYPE = SAMPLER_TYPES.ADAPTIVE
 MIN_NUMBER_OF_SAMPLES = 3 # prevent multiple shared edges when edes get simplified
+NUMBER_OF_SAMPLES = 10 # only for SIMPLE sampling method
+PARAMETERIZE_FOR_ARC_LENGTH = False # only concerning SIMPLE sampling
+ADAPTIVE_REFINEMENT_FACTOR = 0.02 # multiplied to arc length to determin refinement threshold
+ADAPTIVE_SCAN_RESOLUTION = 10 # number of samples used per recursion mid point search
 INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
 REMOVE_SINGULARITIES = True
@@ -43,7 +52,7 @@ SIMPLIFY_LINEAR_EDGES = False
 REORDER_WIRES_FOR_CLOSEST_ENDPOINTS = True
 
 # __main__ config
-INPUT_PATH = paths.C1
+INPUT_PATH = paths.custom(4)
 OUTPUT_DIR = paths.TMP_DIR
 
 ## functions = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
@@ -172,12 +181,22 @@ def edge_sampler_simple(edge_info, face, shape_maps):
         return edge_mesh
 
     surface, curve2d, curve3d, fp, lp, p_length = collect_interface(edge, face)
+    arc_length = calculate_arc_length(curve3d)
 
     for i in range(0, NUMBER_OF_SAMPLES):
         if i == NUMBER_OF_SAMPLES-1:
-            parameter = lp
+            curve_parameter = lp
+            arc_parameter = arc_length
         else:
-            parameter = fp + i*(p_length / (NUMBER_OF_SAMPLES-1))
+            curve_parameter = fp + i*(p_length / (NUMBER_OF_SAMPLES-1))
+            arc_parameter = (i / (NUMBER_OF_SAMPLES-1)) * arc_length
+
+        if PARAMETERIZE_FOR_ARC_LENGTH:
+            abscissa_point = GCPnts_AbscissaPoint(curve3d, arc_parameter, fp)
+            assert abscissa_point.IsDone()
+            parameter = abscissa_point.Parameter()
+        else:
+            parameter = curve_parameter
 
         d1 = sample_derivative(curve3d, parameter)
         derivatives.append(d1)
@@ -193,6 +212,78 @@ def edge_sampler_simple(edge_info, face, shape_maps):
 
     if SIMPLIFY_LINEAR_EDGES:
         simplify_linear_segments(edge_mesh, derivatives)
+
+    # here, the edges orientation are made consistent with that of the wire
+    if edge.Orientation() != wire.Orientation(): # corrects ori to keep edges consistent in wire
+        edge_mesh.reverse()
+
+    return edge_mesh
+def edge_sampler_adaptive(edge_info, face, shape_maps):
+    def collect_interface(edge, face):
+        surface = BRepAdaptor_Surface(face)
+        curve2d = BRepAdaptor_Curve2d(edge, face)
+
+        fp = curve2d.FirstParameter()
+        lp = curve2d.LastParameter()
+
+        return surface, curve2d, fp, lp
+    def recursively_sample_edge(surface, curve, edge, fp, lp, sv_first=None, sv_last=None, meter=None, depth=0):
+        def sample_supervertex(surface, curve2d, parameter):
+            p2d = curve2d.Value(parameter)
+            p3d = surface.Value(p2d.X(), p2d.Y())
+
+            sv = SuperVertex(x=p3d.X(), y=p3d.Y(), z=p3d.Z(), u=p2d.X(), v=p2d.Y())
+
+            return sv
+        p_length = lp - fp
+        if depth == 0:
+            sv_first = sample_supervertex(surface, curve, fp)
+            sv_first.edges_with_p = [(edge, fp)]
+            sv_last = sample_supervertex(surface, curve, lp)
+            sv_last.edges_with_p = [(edge, lp)]
+            meter = calculate_arc_length(curve)
+
+        # choose mid point by scanning for point with greated distance to current mesh
+        sv_mid = None
+        mp = -1
+        max_dist = float('-inf')
+        for i in range(1, ADAPTIVE_SCAN_RESOLUTION-1):
+            p_curr = fp + i*(p_length / (ADAPTIVE_SCAN_RESOLUTION-1))
+            assert fp < p_curr
+            assert lp > p_curr
+
+            sv_curr = sample_supervertex(surface, curve, p_curr)
+            sv_curr.edges_with_p = [(edge, p_curr)]
+
+            curr_dist = calculate_projection_distance(sv_first, sv_last, sv_curr)
+            if curr_dist > max_dist:
+                sv_mid = sv_curr
+                mp = p_curr
+                max_dist = curr_dist
+
+        left_mesh = []
+        right_mesh = []
+        if max_dist**2 > ADAPTIVE_REFINEMENT_FACTOR*meter:
+            left_mesh = recursively_sample_edge(surface, curve, edge, fp, mp,\
+                                                sv_first, sv_mid, meter, depth+1)
+            right_mesh = recursively_sample_edge(surface, curve, edge, mp, lp,\
+                                                 sv_mid, sv_last, meter, depth+1)
+
+        if depth == 0:
+            return [sv_first] + left_mesh + [sv_mid] + right_mesh + [sv_last]
+        else:
+            return left_mesh + [sv_mid] + right_mesh
+    wire, edge = edge_info
+    face_map, _, _ = shape_maps
+
+    edge_mesh = []
+
+    surface, curve, fp, lp = collect_interface(edge, face)
+
+    edge_mesh = recursively_sample_edge(surface, curve, edge, fp, lp)
+    for sv in edge_mesh:
+        sv.face = face
+        sv.face_id = face_map.FindIndex(face)
 
     # here, the edges orientation are made consistent with that of the wire
     if edge.Orientation() != wire.Orientation(): # corrects ori to keep edges consistent in wire
@@ -233,10 +324,14 @@ def sample_edges_in_framework(framework, shape_maps):
 
         # collect all edge meshes
         for edge_info in wire_framework:
-            if SAMPLER_TYPE == SAMPLER_TYPES.SIMPLE:
+            _, edge = edge_info
+            edge_type = BRepAdaptor_Curve(edge).GetType()
+            if SAMPLER_TYPE == SAMPLER_TYPES.SIMPLE or edge_type == GeomAbs_Line:
                 edge_mesh = edge_sampler_simple(edge_info, face, shape_maps)
+            elif SAMPLER_TYPE == SAMPLER_TYPES.ADAPTIVE:
+                edge_mesh = edge_sampler_adaptive(edge_info, face, shape_maps)
             else:
-                pass #TODO different sampler methods
+                raise Exception('add_wire() error - SAMPLER_TYPE unknown')
 
             if len(edge_mesh) >= MIN_NUMBER_OF_SAMPLES:
                 edge_mesh_loop.append(edge_mesh)

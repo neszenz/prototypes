@@ -27,8 +27,11 @@ from OCC.Core.TopAbs import TopAbs_ON, TopAbs_IN
 from OCC.Core.TopAbs import TopAbs_REVERSED
 
 ## config and enum + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
-sampler.NUMBER_OF_SAMPLES = 10
+sampler.SAMPLER_TYPE = sampler.SAMPLER_TYPES.ADAPTIVE
 sampler.MIN_NUMBER_OF_SAMPLES = 3
+sampler.NUMBER_OF_SAMPLES = 5
+sampler.PARAMETERIZE_FOR_ARC_LENGTH = False
+sampler.ADAPTIVE_REFINEMENT_FACTOR = 0.02
 sampler.INCLUDE_INNER_WIRES = True
 sampler.SIMPLIFY_LINEAR_EDGES = False
 
@@ -36,8 +39,8 @@ MAX_ITERATIONS = -1 # -1 for unlimited
 
 # shape and size test options
 SMALLEST_ANGLE = np.deg2rad(30)
-USE_SIZE_TEST = False
-DISTANCE_THRESHOLD = 0.05
+USE_SIZE_TEST = True
+DISTANCE_THRESHOLD = 0.02
 
 PRIORITIZE_AREA         = 0
 PRIORITIZE_CIRCUMRADIUS = 1
