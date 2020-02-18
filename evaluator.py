@@ -2,38 +2,40 @@ from meshkD import SuperVertex, MeshkD, load_from_file
 from util import *
 
 # metric's constants, flags and configuration
+N_DECIMAL_PLACES = 2
+
 METRIC_ANGLES     = 0
 METRIC_MIN_ANGLES = 1
 METRIC_XI         = 2
 METRIC_RATIO      = 3
 
 METRIC_NAMES = {
-    METRIC_ANGLES : 'triangle angles',
+    METRIC_ANGLES :     'triangle angles',
     METRIC_MIN_ANGLES : 'trangles\' minimum angles',
-    METRIC_XI : 'normalized area metric (xi-metric)',
-    METRIC_RATIO : 'radius-edge ratio'
+    METRIC_XI :         'normalized area metric (xi-metric)',
+    METRIC_RATIO :      'radius-edge ratio'
 }
 METRIC_HIST_FLAGS = {
-    METRIC_ANGLES : True,
+    METRIC_ANGLES :     True,
     METRIC_MIN_ANGLES : True,
-    METRIC_XI : True,
-    METRIC_RATIO : True
+    METRIC_XI :         True,
+    METRIC_RATIO :      True
 }
 METRIC_NOB = {
-    METRIC_ANGLES : 55,
+    METRIC_ANGLES :     55,
     METRIC_MIN_ANGLES : 55,
-    METRIC_XI : 55,
-    METRIC_RATIO : 55
+    METRIC_XI :         55,
+    METRIC_RATIO :      55
 }
 METRIC_RANGES = {
-    METRIC_ANGLES : (0.0, np.pi),
-    METRIC_MIN_ANGLES : (0.0, np.pi),
-    METRIC_XI : (0.0, np.sqrt(3) / 4),
-    METRIC_RATIO : (1.0/np.sqrt(3), float('inf'))
+    METRIC_ANGLES :     (0.0, np.rad2deg(np.pi)),
+    METRIC_MIN_ANGLES : (0.0, np.rad2deg(np.pi)),
+    METRIC_XI :         (0.0, np.sqrt(3) / 4),
+    METRIC_RATIO :      (1.0/np.sqrt(3), float('inf'))
 }
 
 # __main__ config
-INPUT_PATH = '../results/tmp/200128_190446.meshkD'
+INPUT_PATH = '../results/tmp/200218_192128.meshkD'
 INDENT = '|   '
 
 def basic_information(mesh):
@@ -87,6 +89,10 @@ def calculate_metric_values(vertices, triangles, metric):
             a1 = calculate_angle_in_corner(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
             a2 = calculate_angle_in_corner(sv1.XYZ_vec3(), sv2.XYZ_vec3(), sv0.XYZ_vec3())
 
+            a0 = np.rad2deg(a0)
+            a1 = np.rad2deg(a1)
+            a2 = np.rad2deg(a2)
+
             min_a = min(a0, a1, a2)
             max_a = max(a0, a1, a2)
 
@@ -111,6 +117,10 @@ def calculate_metric_values(vertices, triangles, metric):
             a0 = calculate_angle_in_corner(sv2.XYZ_vec3(), sv0.XYZ_vec3(), sv1.XYZ_vec3())
             a1 = calculate_angle_in_corner(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
             a2 = calculate_angle_in_corner(sv1.XYZ_vec3(), sv2.XYZ_vec3(), sv0.XYZ_vec3())
+
+            a0 = np.rad2deg(a0)
+            a1 = np.rad2deg(a1)
+            a2 = np.rad2deg(a2)
 
             min_a = min(a0, a1, a2)
             if min_a < min_angle:
@@ -180,8 +190,8 @@ def evaluate_metric(mesh, metric):
 
         values, min_value, max_value = calculate_metric_values(vertices, triangles, metric)
         print(INDENT + 'range: ', end='')
-        print('[', round(np.rad2deg(min_value), 2), sep='', end='')
-        print(', ', round(np.rad2deg(max_value), 2), ']', sep='')
+        print('[', round(min_value, N_DECIMAL_PLACES), sep='', end='')
+        print(', ', round(max_value, N_DECIMAL_PLACES), ']', sep='')
 
     if METRIC_HIST_FLAGS[metric]:
         plot_histogram(values, METRIC_NAMES[metric], METRIC_NOB[metric], METRIC_RANGES[metric])
