@@ -180,11 +180,31 @@ class SuperVertex:
 ## MeshkD  + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 class MeshkD:
     FILE_EXTENSION = '.meshkD'
+    # sampling modes
+    SM_PARC = 'parameterised for arc length (SIMPLE): '
+    SM_TYPE = 'sampler type: '
+    SM_SMFY = 'linear segments simplification: '
+    # sampling values
+    SV_NOSM = 'number of samples (SIMPLE): '
+    SV_MNOS = 'minimum number of samples: '
+    SV_AFAK = 'adaptive refinement factor: '
+    SV_ARES = 'adaptive scan resolution: '
+
+    # meshing mode
+    MM_PRIO = 'priority metric: '
+    MM_SIZE = 'use size test: '
+    MM_ADMS = 'approximation distance multi-sampling: '
+    # meshing values
+    MV_ADTH = 'approximation distance threshold: '
+
+    # number vertices
     NV_INIT = 'initial vertices: '
     NV_REFI = 'refinement vertices: '
     NV_INST = 'inner vertex inserts: '
     NV_SPLT = 'segment splits: '
     NV_DELT = 'encroaching vertices deleted: '
+
+    # number travel test
     NT_INVK = 'travel test invokations: '
     NT_LOOP = 'total travel test loops: '
     NT_SHAD = 'ray shadow tests: '
@@ -200,6 +220,17 @@ class MeshkD:
         for face_mesh in self.face_meshes:
             vertices, _, _, _ = face_mesh
             meta_block = {
+                MeshkD.SM_PARC : -1,
+                MeshkD.SM_TYPE : -1,
+                MeshkD.SM_SMFY : -1,
+                MeshkD.SV_NOSM : -1,
+                MeshkD.SV_MNOS : -1,
+                MeshkD.SV_AFAK : -1,
+                MeshkD.SV_ARES : -1,
+                MeshkD.MM_PRIO : -1,
+                MeshkD.MM_SIZE : -1,
+                MeshkD.MM_ADMS : -1,
+                MeshkD.MV_ADTH : -1,
                 MeshkD.NV_INIT:len(vertices),
                 MeshkD.NV_REFI:0,
                 MeshkD.NV_INST:0,

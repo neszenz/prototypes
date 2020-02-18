@@ -438,7 +438,17 @@ def sample(path):
     framework = generate_mesh_framework(compound, shape_maps)
     face_meshes = sample_edges_in_framework(framework, shape_maps)
 
-    return MeshkD(path, face_meshes)
+    mesh = MeshkD(path, face_meshes)
+    for meta_block in mesh.meta_blocks:
+        meta_block[MeshkD.SM_PARC] = PARAMETERIZE_FOR_ARC_LENGTH
+        meta_block[MeshkD.SM_TYPE] = SAMPLER_TYPE
+        meta_block[MeshkD.SM_SMFY] = SIMPLIFY_LINEAR_EDGES
+        meta_block[MeshkD.SV_NOSM] = NUMBER_OF_SAMPLES
+        meta_block[MeshkD.SV_MNOS] = MIN_NUMBER_OF_SAMPLES
+        meta_block[MeshkD.SV_AFAK] = ADAPTIVE_REFINEMENT_FACTOR
+        meta_block[MeshkD.SV_ARES] = ADAPTIVE_SCAN_RESOLUTION
+
+    return mesh
 
 def noDoublyLoopInsertions(mesh):
     def checkWire(vertices, wire_mesh):

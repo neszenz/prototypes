@@ -39,7 +39,7 @@ MAX_ITERATIONS = -1 # -1 for unlimited
 
 # shape and size test options
 SMALLEST_ANGLE = np.deg2rad(30)
-USE_SIZE_TEST = True
+USE_SIZE_TEST = False
 DISTANCE_THRESHOLD = 0.01
 APPROX_DIST_MULTI_SAMPLING = True
 APPROX_DIST_AREA_WRIGHTED = False
@@ -917,6 +917,10 @@ def triangulate(path):
         print('face', f_index+1, 'of', mesh.number_of_faces(), '. . .')
         face_mesh = mesh.face_meshes[f_index]
         meta_block = mesh.meta_blocks[f_index]
+        meta_block[MeshkD.MM_PRIO] = PRIORITY_FACTOR
+        meta_block[MeshkD.MM_SIZE] = USE_SIZE_TEST
+        meta_block[MeshkD.MM_ADMS] = APPROX_DIST_MULTI_SAMPLING
+        meta_block[MeshkD.MV_ADTH] = DISTANCE_THRESHOLD
         chew93_Surface(face_mesh, meta_block)
         print('\rrefining mesh - done (after', meta_block[MeshkD.NV_REFI], 'iterations)')
 
