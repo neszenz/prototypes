@@ -511,18 +511,28 @@ def on_draw():
         if not flags['draw_labels']:
             return
         global gvars
+
         glDisable(GL_DEPTH_TEST)
+
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
         set_projection(window.width)
+
         sign = '-' if gvars['mesh_index'] > 0 else ' '
         draw_label(0, 'mesh '+sign+str(gvars['mesh_index'])+' ('+mesh.name+')')
+
         if gvars['face_index'] == 0:
             draw_label(1, 'draw all faces')
         else:
             face_id_from_total = str(gvars['face_index']) + '/' + str(len(mesh.face_meshes))
             face_type = mesh.get_face_type(gvars['face_index']-1)
             draw_label(1, 'draw face '+face_id_from_total+' ('+face_type+')')
+
+            meta_block = mesh.meta_blocks[gvars['face_index']-1]
+            label_index = 2
+            for v in meta_block:
+                draw_label(label_index, v + str(meta_block[v]))
+                label_index += 1
         glEnable(GL_DEPTH_TEST)
     global flags, gvars
 
