@@ -31,8 +31,8 @@ amounts = [
 
 plt.bar(y_pos, amounts, align='center', alpha=0.8)
 plt.xticks(y_pos, classes, rotation='vertical')
-plt.ylabel('number of occurrence')
+plt.ylabel('number of occurrences')
 plt.yscale('linear')
-plt.title('surface type distribution of 10th abc data chunk (w/o #91715)')
+# plt.title('surface type distribution of ABC Dataset\'s 10th chunk')
 
 plt.show()
