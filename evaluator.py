@@ -22,8 +22,8 @@ METRIC_HIST_FLAGS = {
     METRIC_RATIO :      True
 }
 METRIC_NOB = {
-    METRIC_ANGLES :     55,
-    METRIC_MIN_ANGLES : 55,
+    METRIC_ANGLES :     90,
+    METRIC_MIN_ANGLES : 90,
     METRIC_XI :         55,
     METRIC_RATIO :      55
 }
@@ -35,7 +35,7 @@ METRIC_RANGES = {
 }
 
 # __main__ config
-INPUT_PATH = '../results/tmp/200218_192128.meshkD'
+INPUT_PATH = '../results/tmp/200218_232441.meshkD'
 INDENT = '|   '
 
 def basic_information(mesh):

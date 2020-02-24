@@ -34,6 +34,7 @@ sampler.PARAMETERIZE_FOR_ARC_LENGTH = False
 sampler.ADAPTIVE_REFINEMENT_FACTOR = 0.005
 sampler.INCLUDE_INNER_WIRES = True
 sampler.SIMPLIFY_LINEAR_EDGES = False
+sampler.SELECTED_MODEL_FACE = -1
 
 MAX_ITERATIONS = -1 # -1 for unlimited
 
@@ -58,7 +59,50 @@ PPE_THRESHOLD = SMALLEST_ANGLE#np.deg2rad(60)
 INPUT_PATH = paths.custom(2)
 OUTPUT_DIR = paths.TMP_DIR
 
+DEBUG_ITERATION = MAX_ITERATIONS-1
 DEBUG_VERTICES = []
+
+def add_dihedral_angle_from(omesh, h):
+    def normal_from_face_handle(omesh, f):
+        sv0, sv1, sv2 = collect_triangle_supervertices(omesh, f)
+        p0 = sv0.XYZ_vec3()
+        p1 = sv1.XYZ_vec3()
+        p2 = sv2.XYZ_vec3()
+        return calculate_normal_normalized(p0, p1, p2)
+    if omesh.is_boundary(omesh.edge_handle(h)):
+        print('travel test on boundary edge')
+        return
+
+    f0 = omesh.face_handle(h)
+    f1 = omesh.face_handle(omesh.opposite_halfedge_handle(h))
+
+    n0 = normal_from_face_handle(omesh, f0)
+    n1 = normal_from_face_handle(omesh, f1)
+
+    angle = calculate_angle_between_vectors(n0, n1)
+
+    global dihedral_min, dihedral_max
+    if angle < dihedral_min:
+        dihedral_min = angle
+    if angle > dihedral_max:
+        dihedral_max = angle
+
+    if iter_counter == DEBUG_ITERATION:
+        print('travel test on dihedral angle:', np.rad2deg(angle))
+
+    return
+def insert_halfway_as_debug(omesh, h):
+    sv0 = sv_from_vh(omesh, omesh.from_vertex_handle(h))
+    sv1 = sv_from_vh(omesh, omesh.to_vertex_handle(h))
+    p0 = sv0.XYZ_vec3()
+    p1 = sv1.XYZ_vec3()
+
+    phw = p0 + ((p1-p0)/2)
+    svhw = SuperVertex(*phw)
+    svhw.set_same_face_as(sv0)
+    DEBUG_VERTICES.append(svhw)
+
+    return
 
 def triangulate_dt(vertices):
     triangles = []
@@ -625,7 +669,15 @@ def calculate_refinement(omesh, delta, meta_block):
         ray_dir = normalize(c_3d - p_orig)
 
         # halt if we encounter a boundary edge (split case)
+        # travel_iteration = 0 #TODO remove after debuging
         while not omesh.is_boundary(omesh.edge_handle(hh)):
+            # if travel_iteration > 262: #TODO remove after debuging
+            #     print('travel() error - travel limit reached!')
+            #     break
+            # else:
+            #     travel_iteration += 1
+            #     if iter_counter == DEBUG_ITERATION:
+            #         insert_halfway_as_debug(omesh, hh)
             meta_block[MeshkD.NT_LOOP] += 1
             # get inside neighboring triangle
             hh = omesh.opposite_halfedge_handle(hh)
@@ -661,19 +713,13 @@ def calculate_refinement(omesh, delta, meta_block):
 
     normal = calculate_normal_normalized(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
     c_3d = calculate_circumcenter_3d(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
-    #TODO remove
-    # if iter_counter == 20:
-    #     sv_c_3d = SuperVertex(*c_3d, same_as=sv0)
-    #     sv_c_3d.project_to_UV()
-    #     DEBUG_VERTICES.append(sv_c_3d)
-    #TODO remove
     c_2d_candidates = calculate_circumcenter_2d_candidates(c_3d, normal, sv0.face)
-    #TODO remove
-    # if iter_counter == 20:
-    #     for (u, v) in c_2d_candidates:
-    #         sv_c_2d = SuperVertex(u=u, v=v, same_as=sv0)
-    #         # DEBUG_VERTICES.append(sv_c_2d)
-    #TODO remove
+    if iter_counter == DEBUG_ITERATION: #TODO remove after debuging
+        sv_c_3d = SuperVertex(*c_3d, same_as=sv0)
+        DEBUG_VERTICES.append(sv_c_3d)
+        for (u, v) in c_2d_candidates:
+            sv_c_2d = SuperVertex(u=u, v=v, same_as=sv0)
+            DEBUG_VERTICES.append(sv_c_2d)
 
     # test if surface circumcenter is in delta
     inside_index = find_point_inside(omesh, delta, c_2d_candidates)
@@ -694,6 +740,7 @@ def calculate_refinement(omesh, delta, meta_block):
     else:
         raise Exception('calculate_refinement() error - neither inside nor outside')
 
+    add_dihedral_angle_from(omesh, hh_selected)
     handle, scc = travel(omesh, delta, hh_selected, c_3d, c_2d_candidates, normal, meta_block)
 
     return handle, scc
@@ -878,14 +925,12 @@ def chew93_Surface(face_mesh, meta_block):
     global iter_counter
     iter_counter = 0
     while delta.is_valid() and iter_counter != MAX_ITERATIONS:
-        print('\rrefining mesh... iteration', iter_counter, end='')
-        #TODO remove
-        # if iter_counter == 20:
-        #     sv0, sv1, sv2 = collect_triangle_supervertices(omesh, delta)
-        #     (x, y, z), (u, v) = calculate_cog(sv0, sv1, sv2)
-        #     sv_cog = SuperVertex(x, y, z, u, v, same_as=sv0)
-        #     DEBUG_VERTICES.append(sv_cog)
-        #TODO remove
+        print('\rrefining mesh... iteration', iter_counter, '', end='')
+        if iter_counter == DEBUG_ITERATION: #TODO remove after debuging
+            sv0, sv1, sv2 = collect_triangle_supervertices(omesh, delta)
+            (x, y, z), (u, v) = calculate_cog(sv0, sv1, sv2)
+            sv_cog = SuperVertex(x, y, z, u, v, same_as=sv0)
+            DEBUG_VERTICES.append(sv_cog)
 
         handle, scc = calculate_refinement(omesh, delta, meta_block)
 
@@ -905,7 +950,7 @@ def chew93_Surface(face_mesh, meta_block):
         iter_counter += 1
 
     parse_back(omesh, face_mesh)
-    # vertices += DEBUG_VERTICES
+    vertices += DEBUG_VERTICES
 
     return
 
@@ -914,6 +959,10 @@ def triangulate(path):
 
     print('>> mesh samples with chew93_Surface')
     for f_index in range(mesh.number_of_faces()):
+        global dihedral_min, dihedral_max
+        dihedral_max = 0.0
+        dihedral_min = np.pi
+
         print('face', f_index+1, 'of', mesh.number_of_faces(), '. . .')
         face_mesh = mesh.face_meshes[f_index]
         meta_block = mesh.meta_blocks[f_index]
@@ -923,6 +972,8 @@ def triangulate(path):
         meta_block[MeshkD.MV_ADTH] = DISTANCE_THRESHOLD
         chew93_Surface(face_mesh, meta_block)
         print('\rrefining mesh - done (after', meta_block[MeshkD.NV_REFI], 'iterations)')
+        if meta_block[MeshkD.NV_REFI] > 0:
+            print('dihedral range: (', np.rad2deg(dihedral_min), ', ', np.rad2deg(dihedral_max), ')', sep='')
 
     mesh.reset_bounding_boxes()
 
@@ -931,5 +982,7 @@ def triangulate(path):
 if __name__ == '__main__':
     for TMP in range(1):
         # MAX_ITERATIONS = TMP
+        # sampler.SELECTED_MODEL_FACE = TMP
+        print('SELECTED FACE:', sampler.SELECTED_MODEL_FACE)
         mesh = triangulate(INPUT_PATH)
         write_to_file(mesh, OUTPUT_DIR)

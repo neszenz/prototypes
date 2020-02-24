@@ -50,6 +50,7 @@ INCLUDE_INNER_WIRES = True
 REMOVE_SINGULARITIES = True
 SIMPLIFY_LINEAR_EDGES = False
 REORDER_WIRES_FOR_CLOSEST_ENDPOINTS = True
+SELECTED_MODEL_FACE = -1 # -1 to select all
 
 # __main__ config
 INPUT_PATH = paths.custom(4)
@@ -106,14 +107,14 @@ def generate_mesh_framework(compound, shape_maps):
     print('model compound contains', ex.number_of_faces(), 'faces', end='')
     print(',', ex.number_of_wires(), 'wires', end='')
     print(',', ex.number_of_edges(), 'edges')
-    cnt = 1 #TODO used for testing
+    cnt = 1
     for face in ex.faces():
-        if cnt != 1:
-            cnt += 1 #TODO used for testing
-            # continue #TODO used for testing
+        if SELECTED_MODEL_FACE > 0 and cnt != SELECTED_MODEL_FACE:
+            cnt += 1
+            continue
         face_framework = generate_face_framework(face, shape_maps)
         model_framework.append(face_framework)
-        cnt += 1 #TODO used for testing
+        cnt += 1
     return model_framework
 
 def edge_sampler_simple(edge_info, face, shape_maps):
