@@ -22,6 +22,13 @@ def calculate_angle_in_corner(p0, p1, p2):
 
     return calculate_angle_between_vectors(p10, p12)
 
+def calculate_min_angle_in_triangle(p0, p1, p2):
+    alpha = calculate_angle_in_corner(p2, p0, p1)
+    beta = calculate_angle_in_corner(p0, p1, p2)
+    gamma = calculate_angle_in_corner(p1, p2, p0)
+
+    return min(alpha, beta, gamma)
+
 def calculate_normal(p0, p1, p2):
     p10 = p0 - p1
     p12 = p2 - p1
