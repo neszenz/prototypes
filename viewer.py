@@ -41,6 +41,7 @@ flags = {
     'draw_labels' : True,
     'flat_shading' : False,
     'cull_faces' : False,
+    'invert_culling' : False,
     'draw_2d_mode' : False,
     'draw_origin' : False,
     'arrow_mode' : False, # draw lines as arrows; only in individual face mode
@@ -174,6 +175,8 @@ def on_key_press(symbol, modifiers):
             apply_to_mesh_index(1)
         if symbol == key.L:
             flags['draw_labels'] = not flags['draw_labels']
+        if symbol == key.X:
+            flags['invert_culling'] = not flags['invert_culling']
         if symbol == key.C:
             reset()
         if symbol == key.V:
@@ -256,7 +259,11 @@ def on_draw():
         set_modelview(mesh)
 
         glEnable(GL_DEPTH_TEST)
-        if flags['cull_faces'] and flags['flat_shading']:
+        if flags['invert_culling']:
+            glFrontFace(GL_CW)
+        else:
+            glFrontFace(GL_CCW)
+        if flags['cull_faces']:
             glEnable(GL_CULL_FACE)
         else:
             glDisable(GL_CULL_FACE)
