@@ -95,16 +95,21 @@ def calculate_arc_length(curve):
 
     return arc_length
 
-def plot_histogram(values, name, num_of_bins, bounds):
+def plot_histogram(values, name, num_of_bins, bounds, size, file_name):
+    print(file_name)
     lower_bound, upper_bound = bounds
     if lower_bound == float('-inf'):
         bounds = (min(values), upper_bound)
     if upper_bound == float('inf'):
         bounds = (lower_bound, max(values))
 
-    n, bins, patches = plt.hist(values, num_of_bins, bounds, facecolor='blue', alpha=0.5)
-    plt.suptitle(name)
-    plt.show()
+    fig, ax = plt.subplots(1, 1, figsize=(size, size/2))#1.33))
+    n, bins, patches = ax.hist(values, num_of_bins, bounds, facecolor='blue', alpha=0.5)
+    ax.set_title(name)
+    # ax.set(xlim=(bounds[1], bounds[0]))
+    fig.tight_layout()
+    # plt.show()
+    plt.savefig('../results/thesis_figures/element_quality/cylinder_progression/figuresXi/'+file_name+'_forXi'+'.png')
 
     return
 

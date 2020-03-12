@@ -1,8 +1,12 @@
+import os.path
+import pathlib
+
 from meshkD import SuperVertex, MeshkD, load_from_file
 from util import *
 
 # metric's constants, flags and configuration
 N_DECIMAL_PLACES = 2
+PLOT_SIZE = 10
 
 METRIC_ANGLES     = 0
 METRIC_MIN_ANGLES = 1
@@ -10,22 +14,22 @@ METRIC_XI         = 2
 METRIC_RATIO      = 3
 
 METRIC_NAMES = {
-    METRIC_ANGLES :     'triangle angles',
-    METRIC_MIN_ANGLES : 'trangles\' minimum angles',
-    METRIC_XI :         'normalized area metric (xi-metric)',
-    METRIC_RATIO :      'radius-edge ratio'
+    METRIC_ANGLES :     'histogram of all angles',
+    METRIC_MIN_ANGLES : 'histogram of minimum angles',
+    METRIC_XI :         'histogram of xi metric',
+    METRIC_RATIO :      'histogram of radius-edge ratio'
 }
 METRIC_HIST_FLAGS = {
-    METRIC_ANGLES :     True,
-    METRIC_MIN_ANGLES : True,
+    METRIC_ANGLES :     False,
+    METRIC_MIN_ANGLES : False,
     METRIC_XI :         True,
-    METRIC_RATIO :      True
+    METRIC_RATIO :      False
 }
 METRIC_NOB = {
-    METRIC_ANGLES :     90,
-    METRIC_MIN_ANGLES : 90,
-    METRIC_XI :         55,
-    METRIC_RATIO :      55
+    METRIC_ANGLES :     70,
+    METRIC_MIN_ANGLES : 70,
+    METRIC_XI :         80,
+    METRIC_RATIO :      80
 }
 METRIC_RANGES = {
     METRIC_ANGLES :     (0.0, np.rad2deg(np.pi)),
@@ -35,7 +39,8 @@ METRIC_RANGES = {
 }
 
 # __main__ config
-INPUT_PATH = '../results/tmp/200218_232441.meshkD'
+INPUT_DIR = '../results/thesis_figures/element_quality/cylinder_progression/'
+INPUT_PATH = '../results/tmp/200229_194956.meshkD'
 INDENT = '|   '
 
 def basic_information(mesh):
@@ -194,7 +199,11 @@ def evaluate_metric(mesh, metric):
         print(', ', round(max_value, N_DECIMAL_PLACES), ']', sep='')
 
     if METRIC_HIST_FLAGS[metric]:
-        plot_histogram(values, METRIC_NAMES[metric], METRIC_NOB[metric], METRIC_RANGES[metric])
+        file_name = str(metric)+'/'
+        file_name += os.path.basename(INPUT_PATH)[:-len(MeshkD.FILE_EXTENSION)]
+        iter_str = str(101) if cnt == 21 else str(cnt*5)
+        title = METRIC_NAMES[metric]+' ('+iter_str+' iterations)'
+        plot_histogram(values, title, METRIC_NOB[metric], METRIC_RANGES[metric], PLOT_SIZE, file_name)
 
     return
 
@@ -202,7 +211,7 @@ def evaluate(path):
     print('>> evaluating file', path)
     mesh = load_from_file(path)
 
-    basic_information(mesh)
+    # basic_information(mesh)
 
     evaluate_metric(mesh, METRIC_ANGLES)
     evaluate_metric(mesh, METRIC_MIN_ANGLES)
@@ -213,4 +222,9 @@ def evaluate(path):
     return
 
 if __name__ == '__main__':
-    evaluate(INPUT_PATH)
+    paths = pathlib.Path(INPUT_DIR).rglob('*'+MeshkD.FILE_EXTENSION)
+    cnt = 0
+    for path in sorted(paths):
+        INPUT_PATH = path
+        evaluate(INPUT_PATH)
+        cnt += 1
