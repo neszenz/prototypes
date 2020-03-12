@@ -12,15 +12,17 @@ import ctypes
 from gerobust.predicates import clockwise, counter_clockwise
 from gerobust import wrapper
 import numpy as np
-import triangle as shewchuk_triangle
 import openmesh as om
+import random
 import sys
+import triangle as shewchuk_triangle
 
 import paths
 import sampler
 from meshkD import SuperVertex, MeshkD, write_to_file
 from util import *
 
+from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
 from OCC.Core.gp import gp_Pnt, gp_Dir, gp_Lin
 from OCC.Core.IntCurvesFace import IntCurvesFace_Intersector
 from OCC.Core.TopAbs import TopAbs_ON, TopAbs_IN
@@ -55,6 +57,21 @@ SKIP_ALL_DOMAIN_CORNERS = False # skip all triangles in domain corners
 SKIP_PPE_DOMAIN_CORNERS = True # skip those with angle smaller than threshold
 PPE_THRESHOLD = SMALLEST_ANGLE#np.deg2rad(60)
 
+# interior sampling
+USE_INTERIOR_SAMPLING = False
+INTERIOR_GRID   = 0
+INTERIOR_RANDOM = 1
+INTERIOR_SAMPLING_METHOD = INTERIOR_GRID
+
+GRID_U_SAMPLES = 5
+GRID_V_SAMPLES = 1
+U_OFFSET_FACTOR = 0.0
+V_OFFSET_FACTOR = 0.0
+
+random.seed(42)
+RANDOM_SAMPLES = 10
+RANDOM_RESOLUTION = 100
+
 # __main__ config
 INPUT_PATH = paths.custom(2)
 OUTPUT_DIR = paths.TMP_DIR
@@ -70,7 +87,6 @@ def add_dihedral_angle_from(omesh, h):
         p2 = sv2.XYZ_vec3()
         return calculate_normal_normalized(p0, p1, p2)
     if omesh.is_boundary(omesh.edge_handle(h)):
-        print('travel test on boundary edge')
         return
 
     f0 = omesh.face_handle(h)
@@ -160,6 +176,45 @@ def triangulate_cdt(face_mesh):
             t_index += 1
 
         return
+    def sample_interior(face_mesh):
+        vertices, _, _, face = face_mesh
+
+        additional_vertices = []
+
+        surface = BRepAdaptor_Surface(face)
+        FU = surface.FirstUParameter()
+        LU = surface.LastUParameter()
+        FV = surface.FirstVParameter()
+        LV = surface.LastVParameter()
+
+        U_LENGTH = LU-FU
+        V_LENGTH = LV-FV
+
+        if INTERIOR_SAMPLING_METHOD == INTERIOR_GRID:
+            for u_index in range(1, GRID_U_SAMPLES+1):
+                for v_index in range(1, GRID_V_SAMPLES+1):
+                    u_offset = U_OFFSET_FACTOR/(GRID_U_SAMPLES+1)
+                    v_offset = V_OFFSET_FACTOR/(GRID_V_SAMPLES+1)
+                    u = FU + ((u_index/(GRID_U_SAMPLES+1))+u_offset)*U_LENGTH
+                    v = FV + ((v_index/(GRID_V_SAMPLES+1))+v_offset)*V_LENGTH
+
+                    sv_add = SuperVertex(u=u, v=v, same_as=vertices[0])
+                    sv_add.project_to_XYZ()
+                    additional_vertices.append(sv_add)
+        elif INTERIOR_SAMPLING_METHOD == INTERIOR_RANDOM:
+            for i in range(RANDOM_SAMPLES):
+                rand0 = random.randint(1, RANDOM_RESOLUTION-1) / RANDOM_RESOLUTION
+                rand1 = random.randint(1, RANDOM_RESOLUTION-1) / RANDOM_RESOLUTION
+                u = FU + rand0*U_LENGTH
+                v = FV + rand1*V_LENGTH
+
+                sv_add = SuperVertex(u=u, v=v, same_as=vertices[0])
+                sv_add.project_to_XYZ()
+                additional_vertices.append(sv_add)
+        else:
+            raise Exception('sample_interior() error - INTERIOR_SAMPLING_METHOD unknown')
+
+        return additional_vertices
     vertices, wire_meshes, triangles, _ = face_mesh
 
     triangles.clear()
@@ -175,6 +230,12 @@ def triangulate_cdt(face_mesh):
     markersInner = [0] * (len(points)-boundary_offset)
     markers = markersBoundary + markersInner
     segments = segments_from_wires(vertices, wire_meshes)
+
+    if USE_INTERIOR_SAMPLING:
+        additional_vertices = sample_interior(face_mesh)
+        vertices += additional_vertices
+        points += [(sv.u, sv.v) for sv in additional_vertices]
+        markers += [0] * (len(additional_vertices))
 
     t.set_points(points, markers=markers)
     t.set_segments(segments)
@@ -950,7 +1011,7 @@ def chew93_Surface(face_mesh, meta_block):
         iter_counter += 1
 
     parse_back(omesh, face_mesh)
-    vertices += DEBUG_VERTICES
+    # vertices += DEBUG_VERTICES
 
     return
 
