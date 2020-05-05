@@ -5,12 +5,14 @@ import pyglet
 from pyglet.gl import *
 from pyglet.window import key, mouse
 
+from mesher_v2 import SMALLEST_ANGLE, DISTANCE_THRESHOLD, APPROX_DIST_MULTI_SAMPLING, APPROX_DIST_AREA_WRIGHTED
 from meshkD import SuperVertex, MeshkD, load_from_file
 from util import *
 import paths
 
 ## config constants  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 INPUT_DIR = paths.TMP_DIR
+INPUT_DIR = '../results/mesher/SURFFIL_DEMO/'
 DEFAULT_X = 1280
 DEFAULT_Y = 720
 ZOOM_DEFAULT = 100
@@ -25,6 +27,10 @@ COLOR_BOUNDARY = np.array((0.0, 0.0, 0.0))
 COLOR_BBOX = np.array((0.5, 0.5, 0.0))
 COLOR_VERTICES = np.array((1.0, 0.0, 0.0))
 
+COLOR_SHAPE_FAIL = np.array((1.0, 1.0, 0.0))
+COLOR_SIZE_FAIL =  np.array((0.0, 1.0, 1.0))
+COLOR_BOTH_FAIL =  np.array((0.0, 1.0, 0.5))
+
 ## global variables  = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +
 meshes = [] # list of tuples (mesh1D, mesh2D)
 window = pyglet.window.Window(DEFAULT_X, DEFAULT_Y,
@@ -38,6 +44,7 @@ flags = {
     'draw_vertices' : True,
     'draw_mesh1D' : False,
     'draw_mesh2D' : True,
+    'draw_meshFailing' : False,
     'draw_labels' : True,
     'flat_shading' : False,
     'cull_faces' : False,
@@ -177,6 +184,8 @@ def on_key_press(symbol, modifiers):
             apply_to_mesh_index(1)
         if symbol == key.L:
             flags['draw_labels'] = not flags['draw_labels']
+        if symbol == key.Z:
+            flags['draw_meshFailing'] = not flags['draw_meshFailing']
         if symbol == key.X:
             flags['invert_culling'] = not flags['invert_culling']
         if symbol == key.C:
@@ -450,6 +459,101 @@ def on_draw():
             if gvars['face_index'] > 0 and gvars['face_index']-1 != face_index:
                 continue
             draw_face(mesh.face_meshes[face_index])
+    def draw_meshFailing(mesh):
+        def draw_face(face_mesh):
+            def draw_triangle(sv0, sv1, sv2, color):
+                if flags['draw_2d_mode']:
+                    v0 = sv0.UV_vec3()
+                    v1 = sv1.UV_vec3()
+                    v2 = sv2.UV_vec3()
+                else:
+                    v0 = sv0.XYZ_vec3()
+                    v1 = sv1.XYZ_vec3()
+                    v2 = sv2.XYZ_vec3()
+
+                glColor3f(*color)
+
+                glVertex3f(v0[0], v0[1], v0[2])
+                glVertex3f(v1[0], v1[1], v1[2])
+                glVertex3f(v2[0], v2[1], v2[2])
+
+                return
+            def shape_test(sv0, sv1, sv2):
+                p0 = sv0.XYZ_vec3()
+                p1 = sv1.XYZ_vec3()
+                p2 = sv2.XYZ_vec3()
+
+                alpha = calculate_angle_in_corner(p0, p1, p2)
+                beta = calculate_angle_in_corner(p1, p2, p0)
+                gamma = calculate_angle_in_corner(p2, p0, p1)
+
+                return min(alpha, beta, gamma) > SMALLEST_ANGLE
+            def size_test(sv0, sv1, sv2):
+                def approximation_distance(sv0, sv1, sv2):
+                    # center-of-gravity distance
+                    sv_cog = SuperVertex.compute_surface_center_of_gravity(sv0, sv1, sv2)
+                    cog_surface = sv_cog.XYZ_vec3()
+                    cog_3d = (sv0.XYZ_vec3() + sv1.XYZ_vec3() + sv2.XYZ_vec3()) / 3
+                    cog_distance = np.linalg.norm(cog_surface - cog_3d)
+
+                    distance = cog_distance
+
+                    if APPROX_DIST_MULTI_SAMPLING:
+                        # halfway-point distances
+                        hw0_surface = SuperVertex.compute_halfway(sv0, sv1).XYZ_vec3()
+                        hw1_surface = SuperVertex.compute_halfway(sv1, sv2).XYZ_vec3()
+                        hw2_surface = SuperVertex.compute_halfway(sv2, sv0).XYZ_vec3()
+                        hw0_3d = sv0.XYZ_vec3() + ((sv1.XYZ_vec3()-sv0.XYZ_vec3()) / 2)
+                        hw1_3d = sv1.XYZ_vec3() + ((sv2.XYZ_vec3()-sv1.XYZ_vec3()) / 2)
+                        hw2_3d = sv2.XYZ_vec3() + ((sv0.XYZ_vec3()-sv2.XYZ_vec3()) / 2)
+                        hw0_distance = np.linalg.norm(hw0_surface - hw0_3d)
+                        hw1_distance = np.linalg.norm(hw1_surface - hw1_3d)
+                        hw2_distance = np.linalg.norm(hw2_surface - hw2_3d)
+
+                        distance = (distance + hw0_distance + hw1_distance + hw2_distance) / 4
+
+                    if APPROX_DIST_AREA_WRIGHTED:
+                        area = calculate_area(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
+                        distance /= area**0.5
+
+                    return distance**2
+                t_distance = approximation_distance(sv0, sv1, sv2)
+
+                return t_distance < DISTANCE_THRESHOLD
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
+
+            vertices, _, triangles, _ = face_mesh
+
+            glBegin(GL_TRIANGLES)
+
+            for t_index in range(len(triangles)):
+                i0, i1, i2 = triangles[t_index]
+                sv0 = vertices[i0]
+                sv1 = vertices[i1]
+                sv2 = vertices[i2]
+                well_shaped = shape_test(sv0, sv1, sv2)
+                well_sized = size_test(sv0, sv1, sv2)
+                if not well_shaped:
+                    color = COLOR_SHAPE_FAIL
+                if not well_sized:
+                    color = COLOR_SIZE_FAIL
+                if not well_shaped and not well_sized:
+                    color = COLOR_BOTH_FAIL
+                if well_shaped and well_sized:
+                    continue
+                else:
+                    draw_triangle(sv0, sv1, sv2, color)
+
+            glEnd()
+
+            return
+        if not flags['draw_mesh2D'] or not flags['draw_meshFailing']:
+            return
+
+        for face_index in range(mesh.number_of_faces()):
+            if gvars['face_index'] > 0 and gvars['face_index']-1 != face_index:
+                continue
+            draw_face(mesh.face_meshes[face_index])
     def draw_vertices(mesh):
         def draw_super_vertex(sv):
             if flags['draw_2d_mode']:
@@ -564,6 +668,7 @@ def on_draw():
 
     draw_bb(mesh)
     draw_mesh2D(mesh)
+    draw_meshFailing(mesh)
     draw_mesh1D(mesh)
     draw_vertices(mesh)
     draw_origin()
