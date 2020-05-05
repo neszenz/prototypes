@@ -43,7 +43,7 @@ SAMPLER_TYPE = SAMPLER_TYPES.ADAPTIVE
 MIN_NUMBER_OF_SAMPLES = 3 # prevent multiple shared edges when edes get simplified
 NUMBER_OF_SAMPLES = 10 # only for SIMPLE sampling method
 PARAMETERIZE_FOR_ARC_LENGTH = False # only concerning SIMPLE sampling
-ADAPTIVE_REFINEMENT_FACTOR = 0.02 # multiplied to arc length to determin refinement threshold
+ADAPTIVE_REFINEMENT_FACTOR = 100.0 # multiplied to arc length to determin refinement threshold
 ADAPTIVE_SCAN_RESOLUTION = 10 # number of samples used per recursion mid point search
 INCLUDE_OUTER_WIRES = True
 INCLUDE_INNER_WIRES = True
@@ -53,7 +53,7 @@ REORDER_WIRES_FOR_CLOSEST_ENDPOINTS = True
 SELECTED_MODEL_FACE = -1 # -1 to select all
 
 # __main__ config
-INPUT_PATH = paths.custom(4)
+INPUT_PATH = paths.SURFFIL
 OUTPUT_DIR = paths.TMP_DIR
 
 ## functions = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = + = +

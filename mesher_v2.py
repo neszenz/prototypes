@@ -33,17 +33,17 @@ sampler.SAMPLER_TYPE = sampler.SAMPLER_TYPES.ADAPTIVE
 sampler.MIN_NUMBER_OF_SAMPLES = 3
 sampler.NUMBER_OF_SAMPLES = 5
 sampler.PARAMETERIZE_FOR_ARC_LENGTH = False
-sampler.ADAPTIVE_REFINEMENT_FACTOR = 0.005
+sampler.ADAPTIVE_REFINEMENT_FACTOR = 300.0
 sampler.INCLUDE_INNER_WIRES = True
 sampler.SIMPLIFY_LINEAR_EDGES = False
-sampler.SELECTED_MODEL_FACE = -1
+sampler.SELECTED_MODEL_FACE = 1
 
 MAX_ITERATIONS = -1 # -1 for unlimited
 
 # shape and size test options
 SMALLEST_ANGLE = np.deg2rad(30)
-USE_SIZE_TEST = False
-DISTANCE_THRESHOLD = 0.01
+USE_SIZE_TEST = True
+DISTANCE_THRESHOLD = 5.0
 APPROX_DIST_MULTI_SAMPLING = True
 APPROX_DIST_AREA_WRIGHTED = False
 
@@ -73,7 +73,7 @@ RANDOM_SAMPLES = 10
 RANDOM_RESOLUTION = 100
 
 # __main__ config
-INPUT_PATH = paths.custom(2)
+INPUT_PATH = paths.SURFFIL
 OUTPUT_DIR = paths.TMP_DIR
 
 DEBUG_ITERATION = MAX_ITERATIONS-1
@@ -775,12 +775,12 @@ def calculate_refinement(omesh, delta, meta_block):
     normal = calculate_normal_normalized(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
     c_3d = calculate_circumcenter_3d(sv0.XYZ_vec3(), sv1.XYZ_vec3(), sv2.XYZ_vec3())
     c_2d_candidates = calculate_circumcenter_2d_candidates(c_3d, normal, sv0.face)
-    if iter_counter == DEBUG_ITERATION: #TODO remove after debuging
-        sv_c_3d = SuperVertex(*c_3d, same_as=sv0)
-        DEBUG_VERTICES.append(sv_c_3d)
-        for (u, v) in c_2d_candidates:
-            sv_c_2d = SuperVertex(u=u, v=v, same_as=sv0)
-            DEBUG_VERTICES.append(sv_c_2d)
+    #if iter_counter == DEBUG_ITERATION: #TODO remove after debuging
+    #    sv_c_3d = SuperVertex(*c_3d, same_as=sv0)
+    #    DEBUG_VERTICES.append(sv_c_3d)
+    #    for (u, v) in c_2d_candidates:
+    #        sv_c_2d = SuperVertex(u=u, v=v, same_as=sv0)
+    #        DEBUG_VERTICES.append(sv_c_2d)
 
     # test if surface circumcenter is in delta
     inside_index = find_point_inside(omesh, delta, c_2d_candidates)
@@ -992,26 +992,27 @@ def chew93_Surface(face_mesh, meta_block):
             (x, y, z), (u, v) = calculate_cog(sv0, sv1, sv2)
             sv_cog = SuperVertex(x, y, z, u, v, same_as=sv0)
             DEBUG_VERTICES.append(sv_cog)
-
-        handle, scc = calculate_refinement(omesh, delta, meta_block)
-
-        if isinstance(handle, om.FaceHandle):
-            vh_new = insert_inner_vertex(omesh, vertices, handle, scc, meta_block)
         else:
-            assert isinstance(handle, om.EdgeHandle)
-            vh_new = split_edge(omesh, vertices, handle, meta_block)
+            DEBUG_VERTICES.clear()
+            handle, scc = calculate_refinement(omesh, delta, meta_block)
 
-        meta_block[MeshkD.NV_REFI] += 1
+            if isinstance(handle, om.FaceHandle):
+                vh_new = insert_inner_vertex(omesh, vertices, handle, scc, meta_block)
+            else:
+                assert isinstance(handle, om.EdgeHandle)
+                vh_new = split_edge(omesh, vertices, handle, meta_block)
 
-        # after vertex insertion and possible deletion, restore SCDT criteria
-        restore_scdt(omesh, vh_new)
+            meta_block[MeshkD.NV_REFI] += 1
 
-        # update for next iteration
-        delta = find_largest_failing_triangle(omesh)
+            # after vertex insertion and possible deletion, restore SCDT criteria
+            restore_scdt(omesh, vh_new)
+
+            # update for next iteration
+            delta = find_largest_failing_triangle(omesh)
         iter_counter += 1
 
     parse_back(omesh, face_mesh)
-    # vertices += DEBUG_VERTICES
+    vertices += DEBUG_VERTICES
 
     return
 
@@ -1042,7 +1043,8 @@ def triangulate(path):
 
 if __name__ == '__main__':
     for TMP in range(1):
-        # MAX_ITERATIONS = TMP
+        MAX_ITERATIONS = 34
+        DEBUG_ITERATION = min(MAX_ITERATIONS-1, 31)
         # sampler.SELECTED_MODEL_FACE = TMP
         print('SELECTED FACE:', sampler.SELECTED_MODEL_FACE)
         mesh = triangulate(INPUT_PATH)

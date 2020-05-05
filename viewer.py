@@ -36,7 +36,7 @@ window_caption = 'Delaunay Surface Mesh Refinement'
 flags = {
     'draw_bounding_box' : True,
     'draw_vertices' : True,
-    'draw_mesh1D' : True,
+    'draw_mesh1D' : False,
     'draw_mesh2D' : True,
     'draw_labels' : True,
     'flat_shading' : False,
@@ -169,6 +169,8 @@ def on_key_press(symbol, modifiers):
             flags['cull_faces'] = not flags['cull_faces']
         if symbol == key.F:
             flags['draw_2d_mode'] = not flags['draw_2d_mode']
+        if symbol == key.G:
+            gvars['mesh_index'] = len(meshes)-1
         if symbol == key.J:
             apply_to_mesh_index(-1)
         if symbol == key.K:
@@ -187,7 +189,11 @@ def on_key_press(symbol, modifiers):
             flags['draw_mesh1D'] = not flags['draw_mesh1D']
         if symbol == key.M:
             flags['draw_mesh2D'] = not flags['draw_mesh2D']
-    return pyglet.event.EVENT_HANDLED # disables ESC termination handler
+    elif modifiers == 1:
+        if symbol == key.G:
+            gvars['mesh_index'] = 0
+
+    #return pyglet.event.EVENT_HANDLED # disables ESC termination handler
 
 @window.event
 def on_mouse_drag(x, y, dx, dy, button, modifiers):
@@ -546,8 +552,8 @@ def on_draw():
     window.set_caption(window_caption)
     glClearColor(*COLOR_BACKGROUND, 1.0)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-    glLineWidth(1.0)
-    glPointSize(4.0)
+    glLineWidth(2.0)
+    glPointSize(8.0)
 
     if len(meshes) == 0:
         draw_no_meshes_msg()
